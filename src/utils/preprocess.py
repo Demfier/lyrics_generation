@@ -1,0 +1,238 @@
+import os
+import re
+import sys
+import h5py
+import math
+import json
+import torch
+import gensim
+import random
+import itertools
+import unicodedata
+import numpy as np
+import pandas as pd
+import DALI as dali_code
+from itertools import zip_longest
+
+import matplotlib.pyplot as plt
+
+
+def process_raw(config):
+    """
+    process dali dataset and construct the train, val and test dataset
+    """
+    # This step takes a bit of time
+    print('Loading dali dataset')
+    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
+                                               skip=[], keep=[])
+    print('Loaded')
+
+
+
+
+# Vocab and file-reading part
+class Vocabulary(object):
+    """Vocabulary class"""
+    def __init__(self):
+        super(Vocabulary, self).__init__()
+        self.word2index = {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
+        self.word2count = {}
+        self.index2word = {0: '<PAD>', 1: '<SOS>', 2: '<EOS>', 3: '<UNK>'}
+        self.size = 4  # count the special tokens above
+
+    def add_sentence(self, sentence):
+        for word in sentence.strip().split():
+            self.add_word(word)
+
+    def add_word(self, word):
+        if word not in self.word2index:
+            self.word2index[word] = self.size
+            self.word2count[word] = 1
+            self.index2word[self.size] = word
+            self.size += 1
+        else:
+            self.word2count[word] += 1
+
+    def sentence2index(self, sentence):
+        indexes = []
+        for w in sentence.split():
+            try:
+                indexes.append(self.word2index[w])
+            except KeyError as e:  # handle OOV
+                indexes.append(self.word2index['<UNK>'])
+        return indexes
+
+    def index2sentence(self, indexes):
+        return [self.index2word[i] for i in indexes]
+
+
+def build_vocab(config):
+    all_pairs = read_pairs()
+    all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
+    vocab = Vocabulary()
+    for pair in all_pairs:
+        vocab.add_sentence(pair[0])
+    print('Vocab size: {}'.format(vocab.size))
+    np.save(config['vocab_path'], vocab, allow_pickle=True)
+    return vocab
+
+
+def read_pairs(mode='all'):
+    """
+    Reads src-target sentence pairs given a mode
+    """
+    if mode == 'all':
+        dataset = []
+        with open('data/released/train.json', 'r') as f:
+            dataset = json.load(f)
+        with open('data/released/val.json', 'r') as f:
+            dataset += json.load(f)
+    else:  # if mode == 'train' / 'val'
+        with open('data/released/{}.json'.format(mode), 'r') as f:
+            dataset = json.load(f)
+
+    lines = []
+    pairs = []
+    for o in dataset:
+        pairs.append((normalize_string('{}'.format(
+            o['claim'])), o['label']))
+    return pairs
+
+
+def normalize_string(x):
+    """Lower-case, trip and remove non-letter characters
+    ==============
+    Params:
+    ==============
+    x (Str): the string to normalize
+    """
+    x = unicode_to_ascii(x.lower().strip())
+    x = re.sub(r'([.!?])', r'\1', x)
+    x = re.sub(r'[^a-zA-Z.!?]+', r' ', x)
+    return x
+
+
+def unicode_to_ascii(x):
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', x)
+        if unicodedata.category(c) != 'Mn')
+
+
+def filter_pairs(pairs, max_len):
+    """
+    Filter pairs with either of the sentence > max_len tokens
+    ==============
+    Params:
+    ==============
+    pairs (list of tuples): each tuple is a src-target sentence pair
+    max_len (Int): Max allowable sentence length
+    """
+    return [pair for pair in pairs if (len(pair[0].split()) <= max_len)]
+
+
+# Embeddings part
+def generate_word_embeddings(vocab, config):
+    # Load original (raw) embeddings
+    ftype = 'bin'
+
+    # Train w2v models if not already trained
+    train_w2v_model(config)
+
+    src_embeddings = gensim.models.KeyedVectors.load_word2vec_format(
+        'data/raw/english_w2v.bin', binary=True)
+
+    # Create filtered embeddings
+    # Initialize filtered embedding matrix
+    combined_embeddings = np.zeros((vocab.size, config['embedding_dim']))
+    for index, word in vocab.index2word.items():
+        try:  # random normal for special and OOV tokens
+            if index <= 4:
+                combined_embeddings[index] = \
+                    np.random.normal(size=(config['embedding_dim'], ))
+                continue  # use continue to avoid extra `else` block
+            combined_embeddings[index] = src_embeddings[word]
+        except KeyError as e:
+            combined_embeddings[index] = \
+                np.random.normal(size=(config['embedding_dim'], ))
+
+    with h5py.File(config['filtered_emb_path'], 'w') as f:
+        f.create_dataset('data', data=combined_embeddings, dtype='f')
+    return torch.from_numpy(combined_embeddings).float()
+
+
+def train_w2v_model(config):
+    all_pairs = read_pairs()
+    all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
+    random.shuffle(all_pairs)
+    src_sentences = []
+    for pair in all_pairs:
+        src_sentences.append(pair[0].split())
+
+    src_w2v = gensim.models.Word2Vec(src_sentences, size=300,
+                                     min_count=1, iter=50)
+    src_w2v.wv.save_word2vec_format('data/raw/english_w2v.bin', binary=True)
+
+
+def load_word_embeddings(config):
+    with h5py.File(config['filtered_emb_path'], 'r') as f:
+        return torch.from_numpy(np.array(f['data'])).float()
+
+
+def prepare_data(config):
+    data_dir = config['data_dir']
+    task = config['task']
+    languages = config['lang_pair']
+    max_len = config['MAX_LENGTH']
+
+    train_pairs = filter_pairs(read_pairs('{}{}/'.format(data_dir, task),
+                                          languages, 'train'), max_len)
+    val_pairs = filter_pairs(read_pairs('{}{}/'.format(data_dir, task),
+                                        languages, 'val'), max_len)
+    test_pairs = filter_pairs(read_pairs('{}{}/'.format(data_dir, task),
+                                         languages, 'test'), max_len)
+
+    random.shuffle(train_pairs)
+    random.shuffle(val_pairs)
+    random.shuffle(test_pairs)
+    return train_pairs, val_pairs, test_pairs
+
+
+def batch_to_model_compatible_data(vocab, sentences):
+    """
+    Returns padded source and target index sequences
+    ==================
+    Parameters:
+    ==================
+    vocab (Vocabulary object): Vocabulary built from the dataset
+    pairs (list of tuples): The source and target sentence pairs
+    """
+    pad_token = vocab.word2index['<PAD>']
+    eos_token = vocab.word2index['<EOS>']
+    src_indexes, src_lens = [], []
+    for sent in sentences:
+        src_indexes.append(vocab.sentence2index(sent) + [eos_token])
+        src_lens.append(len(sent.split()))
+
+    # pad the batches
+    src_indexes = pad_indexes(src_indexes, value=pad_token)
+    src_lens = torch.tensor(src_lens)
+    return src_indexes, src_lens
+
+
+def _btmcd(vocab, sentences):
+    """alias for batch_to_model_compatible_data"""
+    return batch_to_model_compatible_data(vocab, sentences)
+
+
+def pad_indexes(indexes_batch, value):
+    """
+    Returns a padded tensor of shape (max_seq_len, batch_size) where
+    max_seq_len is the sequence with max length in indexes_batch and
+    batch_size is the number of elements in indexes_batch
+    ==================
+    Parameters:
+    ==================
+    indexes_batch (list of list): the batch of indexes to pad
+    value (int): the value with which to pad the indexes batch
+    """
+    return torch.tensor(list(zip_longest(*indexes_batch, fillvalue=value)))
