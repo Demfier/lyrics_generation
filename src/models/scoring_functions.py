@@ -23,11 +23,14 @@ class RNNScorer(nn.Module):
         self.dropout = config['dropout']
         self.embedding_wts = embedding_wts
         self.output_dim = n_lables
-        self.embedding = nn.Embedding.from_pretrained(embedding_wts,
-                                                      freeze=False)
+        self.embedding = nn.Embedding.from_pretrained(embedding_wts, freeze=False)
         self.embedding_dropout = nn.Dropout(config['dropout'])
         self.bidirectional = config['bidirectional']
         self.unit = config['unit']
+        self.pf = (2 if self.bidirectional else 1)
+        self.Wy = nn.Linear(self.pf*self.config['hidden_dim'], self.pf*self.config['hidden_dim'], bias=False)
+        self.Wh = nn.Linear(self.pf*self.config['hidden_dim'], self.pf*self.config['hidden_dim'], bias=False)
+        self.w = nn.Linear(self.pf*self.config['hidden_dim'], 1, bias=False)
 
         if self.unit == 'lstm':
             self.rnn = nn.LSTM(self.config['embedding_dim'],
@@ -48,59 +51,76 @@ class RNNScorer(nn.Module):
                               dropout=self.dropout,
                               bidirectional=self.bidirectional)
 
-        self.out = nn.Linear(self.config['hidden_dim'], self.output_dim)
+        self.out = nn.Linear(4*self.pf*self.config['hidden_dim'], self.output_dim)
         self.softmax = F.softmax
         self.use_attn = config['use_attn?']
 
-    def attn(self, rnn_output, final_hidden):
-        """
-        Returns `attended` hidden state given an rnn_output and its final
-        hidden state
 
-        attn: torch.Tensor, torch.Tensor -> torch.Tensor
-        requires:
-            rnn_output.shape => batch_size x max_seq_len x hidden_dim
-            final_hidden.shape => batch_size x hidden_dim
-        """
-        attn_wts = torch.bmm(rnn_output, final_hidden.unsqueeze(2)).squeeze(2)
-        soft_attn_wts = F.softmax(attn_wts, dim=1)  # bs x num_t
-        # In the next step, rnn_output.shape changes as follows:
-        # (bs x num_t x hidden_dim) => (bs x hidden_dim x num_t)
-        # Finally, we get new_hidden of shape: (bs x hidden_dim)
-        new_hidden = torch.bmm(rnn_output.transpose(1, 2),
-                               soft_attn_wts.unsqueeze(2)).squeeze(2)
-        return new_hidden
+    def attn(self, rnn_output, pool):
+        M_left = self.Wy(rnn_output)
+        #(2d, 2d)(bts, n, 2d) = (bts, n, 2d)
+        M_right = self.Wh(pool).unsqueeze(2)
+        #(2d,2d)(bts,2d) = (bts,2d)
+        M_right = M_right.unsqueeze(2)
+        #(bts, 2d, 1)
+        M_right = M_right.repeat(1,1,rnn_output.shape[1])
+        #(bts, 2d, n)
+        M_right = M_right.permute(0,2,1)
+        M = torch.add(M_left,M_right)
+        M = torch.tanh(M)
+        attn_wts = self.w(M)
+        #(2d,1)(bts,n,2d) = (bts, n, 1)
+        soft_attn_wts = f.softmax(attn_wts, dim=1) #along n
+        soft_attn_wts = soft_attn_wts.permute(0,2,1)
+        new_encoded = torch.bmm(soft_attn_wts, rnn_output)
+        #(bts, 1, n)(bts, n, 2d) = (bts, 1, 2d)
+        new_encoded = new_encoded.squeeze(1)
+        return new_encoded
 
-    def forward(self, input_seq_batch, input_lengths):
-        """
-        TODO: Modify the classifer for late fusion
-        """
-        max_seq_length, bs = input_seq_batch.size()
-        embedded = self.embedding_dropout(self.embedding(input_seq_batch))
+    def pool(self, rnn_output):
 
+        if self.avg_pool == True:
+            rnn_output = f.avg_pool1d(rnn_output, rnn_output.size(2))
+        else:
+            rnn_output = f.max_pool1d(rnn_output, rnn_output.size(2))
+        
+        return rnn_output.squeeze(2)
+        #(batch_size, 2*hidden_dim)
+
+
+    def encoder(self, embedded):
         if self.unit == 'lstm':
             rnn_output, (hidden, _) = self.rnn(embedded)
         else:  # gru/rnn
             rnn_output, hidden = self.rnn(embedded)
 
-        if self.use_attn:
-            # Do this to sum the bidirectional outputs
-            rnn_output = rnn_output.view(2, max_seq_length, bs,
-                                         self.config['hidden_dim'])
-            rnn_output = (rnn_output[0, :, :self.config['hidden_dim']] +
-                          rnn_output[1, :, :self.config['hidden_dim']])
-            rnn_output = rnn_output.permute(1, 0, 2)  # bs x num_t x hidden_dim
+        return rnn_output, hidden
 
-            final_hidden = hidden.view(self.config['n_layers'], 2,
-                                       bs, self.config['hidden_dim'])[-1]
-            # sum (pool) forward and backward hidden states
-            final_hidden = (final_hidden[0, :, :self.config['hidden_dim']] +
-                            final_hidden[1, :, :self.config['hidden_dim']])
 
-            attended_ouptut = self.attn(rnn_output, final_hidden)
-            return self.out(attended_ouptut)
+    def fusion(self, p, h):
+        p_h_dot = p*h
+        p_h_diff = torch.abs(p-h)
+        concat = torch.cat((p,p_h_dot),dim=1)
+        concat = torch.cat((concat,p_h_diff),dim=1)
+        concat = torch.cat((concat,h),dim=1)
 
-        # Here, rnn_output.shape becomes => (bs x hidden_dim)
-        rnn_output = (rnn_output[:, :, :self.config['hidden_dim']] +
-                      rnn_output[:, :, self.config['hidden_dim']:])
-        return self.out(rnn_output)
+        return concat
+
+    def forward(self, input_seq_batch, input_lengths):
+
+        # model taken from the paper https://arxiv.org/pdf/1605.09090.pdf
+        music_embeddings = (self.embedding(input_seq_batch['music'])).permute(1,0,2)
+        lyrics_embeddings = (self.embedding(input_seq_batch['lyrics'])).permute(1,0,2)
+        #batch_size, max_sequence_length, embedding_length
+        music_output, music_hidden = encoder(music_embeddings)
+        lyrics_output, lyrics_hidden = encoder(lyrics_embeddings)
+
+        music_pool = pool(music_output.permute(1,2,0))
+        lyrics_pool = pool(lyrics_output.permute(1,2,0))
+
+        music = self.attn(music_output.permute(1,0,2), music_pool)
+        lyrics = self.attn(lyrics_output.permute(1,0,2), lyrics_pool)
+        fused = self.fusion(music, lyrics)
+        
+        return self.out(fused)
+
