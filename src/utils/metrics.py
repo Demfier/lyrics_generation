@@ -1,4 +1,5 @@
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, precision_score, recall_score
+import matplotlib.pyplot as plt
 
 
 def evaluate(targets, predictions):

@@ -9,8 +9,6 @@ import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
 
-from config import model_config as config
-
 
 import torch
 from torch import nn, optim
@@ -20,7 +18,7 @@ import torch.nn.functional as F
 class RNNScorer(nn.Module):
     """docstring for BiRNNScorer"""
     def __init__(self, config, embedding_wts, n_lables):
-        super(BiRNNScorer, self).__init__()
+        super(RNNScorer, self).__init__()
         self.config = config
         self.dropout = config['dropout']
         self.embedding_wts = embedding_wts

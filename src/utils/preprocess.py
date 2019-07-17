@@ -6,6 +6,7 @@ import math
 import json
 import torch
 import gensim
+import pickle
 import random
 import itertools
 import unicodedata
@@ -13,6 +14,7 @@ import numpy as np
 import pandas as pd
 import DALI as dali_code
 from itertools import zip_longest
+from sklearn.model_selection import train_test_split
 
 import matplotlib.pyplot as plt
 
@@ -20,14 +22,79 @@ import matplotlib.pyplot as plt
 def process_raw(config):
     """
     process dali dataset and construct the train, val and test dataset
+    NOTE: DALI info is not being used as we are not dealing with audio for now
     """
     # This step takes a bit of time
-    print('Loading dali dataset')
+    print('Loading DALI')
     dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
                                                skip=[], keep=[])
-    print('Loaded')
+    dataset = []
+    file_ids = os.listdir(config['dali_path'])
+    for f_id in file_ids:
+        if f_id == 'info':
+            continue
+        # f_id is of the format id.gz. remove the gz part
+        f_id = f_id.split('.')[0]
+        # Get different level of annotations
+        annotations = dali_data[f_id].annotations
+        note_level = annotations['annot']['notes']
+        word_level = annotations['annot']['words']
+        line_level = annotations['annot']['lines']
+
+        sample = {}
+        line_id = 0
+        notes_seq = []
+        words_seq = []
+        for n in note_level:
+            if 'index' not in n:
+                continue
+            note = freq2note(n['freq'][0])
+            word_id = n['index']
+            curr_line_id = word_level[word_id]['index']
+            if not notes_seq:
+                line_id = curr_line_id
+
+            if curr_line_id == line_id:
+                notes_seq.append(note)
+                words_seq.append(n['text'])
+            else:
+                sample['notes'] = notes_seq
+                sample['line_sanity'] = ' '.join(words_seq)
+                sample['line'] = line_level[line_id]['text']
+                dataset.append(sample)
+                line_id = curr_line_id
+                notes_seq = []
+                words_seq = []
+                sample = {}
+    with open('data/processed/combined_dataset.pkl', 'wb') as f:
+        pickle.dump(dataset, f)
+    print('Created processed dataset')
 
 
+def freq2note(freq):
+    return np.round(12 * np.log2(freq/440.) + 69).astype(int)
+
+
+def create_train_val_split(dataset):
+    train, testval = train_test_split(dataset, train_size=0.8)
+    test, val = train_test_split(testval, test_size=0.5)
+    with open('data/processed/train.pkl', 'wb') as f:
+        pickle.dump(train, f)
+    with open('data/processed/test.pkl', 'wb') as f:
+        pickle.dump(test, f)
+    with open('data/processed/val.pkl', 'wb') as f:
+        pickle.dump(val, f)
+    print('Split dataset')
+
+
+def load_data(config):
+    with open(config['data_dir'] + 'train.pkl', 'rb') as f:
+        train_set = pickle.load(f)
+    with open(config['data_dir'] + 'test.pkl', 'rb') as f:
+        test_set = pickle.load(f)
+    with open(config['data_dir'] + 'val.pkl', 'rb') as f:
+        val_set = pickle.load(f)
+    return train_set, val_set, test_set
 
 
 # Vocab and file-reading part
@@ -82,20 +149,15 @@ def read_pairs(mode='all'):
     Reads src-target sentence pairs given a mode
     """
     if mode == 'all':
-        dataset = []
-        with open('data/released/train.json', 'r') as f:
-            dataset = json.load(f)
-        with open('data/released/val.json', 'r') as f:
-            dataset += json.load(f)
-    else:  # if mode == 'train' / 'val'
-        with open('data/released/{}.json'.format(mode), 'r') as f:
-            dataset = json.load(f)
+        with open('data/processed/combined_dataset.pkl', 'rb') as f:
+            dataset = pickle.load(f)
+    else:  # if mode == 'train' / 'val' / 'test'
+        with open('data/processed/{}.pkl'.format(mode), 'rb') as f:
+            dataset = pickle.load(f)
 
-    lines = []
     pairs = []
     for o in dataset:
-        pairs.append((normalize_string('{}'.format(
-            o['claim'])), o['label']))
+        pairs.append((normalize_string('{}'.format(o['line'])), o['notes']))
     return pairs
 
 
@@ -135,9 +197,6 @@ def generate_word_embeddings(vocab, config):
     # Load original (raw) embeddings
     ftype = 'bin'
 
-    # Train w2v models if not already trained
-    train_w2v_model(config)
-
     src_embeddings = gensim.models.KeyedVectors.load_word2vec_format(
         'data/raw/english_w2v.bin', binary=True)
 
@@ -176,25 +235,6 @@ def train_w2v_model(config):
 def load_word_embeddings(config):
     with h5py.File(config['filtered_emb_path'], 'r') as f:
         return torch.from_numpy(np.array(f['data'])).float()
-
-
-def prepare_data(config):
-    data_dir = config['data_dir']
-    task = config['task']
-    languages = config['lang_pair']
-    max_len = config['MAX_LENGTH']
-
-    train_pairs = filter_pairs(read_pairs('{}{}/'.format(data_dir, task),
-                                          languages, 'train'), max_len)
-    val_pairs = filter_pairs(read_pairs('{}{}/'.format(data_dir, task),
-                                        languages, 'val'), max_len)
-    test_pairs = filter_pairs(read_pairs('{}{}/'.format(data_dir, task),
-                                         languages, 'test'), max_len)
-
-    random.shuffle(train_pairs)
-    random.shuffle(val_pairs)
-    random.shuffle(test_pairs)
-    return train_pairs, val_pairs, test_pairs
 
 
 def batch_to_model_compatible_data(vocab, sentences):
