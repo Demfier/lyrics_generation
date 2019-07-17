@@ -2,12 +2,12 @@ import torch
 model_config = {
     'clip': 50,
     'lr': 0.001,
-    'n_layers': 3,
+    'n_layers': 2,
     'unit': 'lstm',
     'dropout': 0.3,
     'n_epochs': 500,
     'MAX_LENGTH': 30,
-    'batch_size': 10,
+    'batch_size': 1000,
     'hidden_dim': 256,
     'use_attn?': True,
     'embedding_dim': 300,
@@ -22,5 +22,6 @@ model_config = {
     'use_embeddings?': True,
     'first_run?': True,
     'bidirectional': True,
-    'pretrained_model': False
+    'pretrained_model': False,
+    'save_dir': 'saved_models/'
 }

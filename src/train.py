@@ -51,53 +51,11 @@ def save_snapshot(model, epoch_num):
     torch.save({
         'model': model.state_dict(),
         'epoch': epoch_num
-        }, '{}{}-{}-{}L-{}{}-{}'.format(conf['save_dir'],
-                                        conf['task'],
-                                        conf['model_code'],
-                                        conf['enc_n_layers'],
-                                        'bi' if conf['bidirectional'] else '',
-                                        conf['unit'], epoch_num))
-
-
-def translate(vocab, logits, y, x, inputs, generated, ground_truth):
-    """
-    Converts model output logits and tokenized batch y into to sentences
-    logits -> (max_y_len, bs, vocab_size)
-    y -> (max_y_len, bs)
-
-    Effects: Mutates generated, and ground_truth
-    """
-    inp_tokens = x[1:].permute(1, 0)
-    _, pred_tokens = torch.max(logits[1:], dim=2)
-    pred_tokens = pred_tokens.permute(1, 0)
-    gt_tokens = y[1:].permute(1, 0)
-
-    # Get sentences from token ids
-    for token_list in inp_tokens:
-        sentence = []
-        for t in token_list:
-            sentence.append(vocab.index2word[t.item()])
-            if t == conf['EOS_TOKEN']:
-                break
-        inputs.append(sentence)
-
-    for token_list in pred_tokens:
-        sentence = []
-        for t in token_list:
-            sentence.append(vocab.index2word[t.item()])
-            if t == conf['EOS_TOKEN']:
-                break
-        generated.append(sentence)
-
-    for token_list in gt_tokens:
-        sentence = []
-        for t in token_list:
-            sentence.append(vocab.index2word[t.item()])
-            if t == conf['EOS_TOKEN']:
-                break
-        # making it a listof(listof Str) as we need to calculate the bleu score
-        ground_truth.append([sentence])
-    return inputs, generated, ground_truth
+        }, '{}-{}-{}L-{}{}-{}'.format(conf['save_dir'],
+                                      conf['model_code'],
+                                      conf['n_layers'],
+                                      'bi' if conf['bidirectional'] else '',
+                                      conf['unit'], epoch_num))
 
 
 def main():
@@ -106,7 +64,12 @@ def main():
 
     vocab = load_vocabulary()
     print('Loading train, validation and test pairs.')
-    train_pairs, val_pairs, test_pairs = preprocess.load_data(conf)
+    train_pairs, y_train = preprocess.read_pairs(mode='train')
+    y_train = y_train.to(conf['device'])
+    val_pairs, y_val = preprocess.read_pairs(mode='val')
+    y_val = y_train.to(conf['device'])
+    test_pairs, y_test = preprocess.read_pairs(mode='test')
+    y_test = y_train.to(conf['device'])
     # train_pairs = train_pairs[:1000]
     # val_pairs = val_pairs[:500]
     # test_pairs = test_pairs[:500]
@@ -122,6 +85,8 @@ def main():
     print(embedding_wts.shape)
     model = RNNScorer(conf, embedding_wts, 2)
     model = model.to(device)
+    criterion = nn.CrossEntropyLoss(reduction='sum')
+    optimizer = optim.Adam(model.parameters(), lr=conf['lr'])
     if conf['pretrained_model']:
         print('Restoring {}...'.format(conf['pretrained_model']))
         checkpoint = torch.load('{}{}'.format(conf['save_dir'],
@@ -137,91 +102,76 @@ def main():
 
     print('Training started..')
     for e in range(epoch, conf['n_epochs']):
+        model.train()
+        optimizer.zero_grad()
         epoch_loss = []
         # Train for an epoch
         for iter in range(0, n_train, conf['batch_size']):
             iter_pairs = train_pairs[iter: iter + conf['batch_size']]
             if len(iter_pairs) == 0:  # handle the strange error
                 continue
-            x_train, x_lens, y_train = preprocess._btmcd(vocab,
-                                                         iter_pairs,
-                                                         conf['device'])
+            x_train = preprocess._btmcd(vocab, iter_pairs, conf['device'])
             # forward pass through the model
-            outputs, loss = model(x_train, x_lens, y_train)
-            # y_train -> (max_y_len, bs)
+            predictions = model(x_train)
+            # y_train -> (1, bs)
+            loss = criterion(predictions, y_train[iter: iter + conf['batch_size']])
+            loss.backward()
+            predictions = torch.argmax(predictions, dim=1).cpu()
+            nn.utils.clip_grad_norm_(model.parameters(), conf['clip'])
+            optimizer.step()
             epoch_loss.append(loss.item())
-        # Print average batch loss
-        print('Epoch [{}/{}]: Mean Train Loss: {}'.format(e, conf['n_epochs'],
-                                                          np.mean(epoch_loss)))
+            writer.add_scalar('data/train_loss', np.mean(epoch_loss), iter)
+
         epoch_loss = []
 
         # Validate
         with torch.no_grad():
-            inputs = []
             generated = []
             actual = []
+            model.eval()
             for iter in range(0, n_val, conf['batch_size']):
                 iter_pairs = val_pairs[iter: iter + conf['batch_size']]
-                x_val, x_lens, y_val = preprocess._btmcd(vocab,
-                                                         iter_pairs,
-                                                         conf['device'])
+                x_val = preprocess._btmcd(vocab, iter_pairs, conf['device'])
 
-                outputs, loss = model(x_val, x_lens)
+                predictions = model(x_val)
+                loss = criterion(predictions,
+                                 y_val[iter: iter + conf['batch_size']])
+                generated += list(torch.argmax(predictions, dim=1).cpu())
+                actual += list(y_val[iter: iter + conf['batch_size']].cpu())
                 epoch_loss.append(loss.item())
-                # Get sentences from logits and token ids
-                translate(vocab, outputs, y_val, x_val,
-                          inputs, generated, actual)
 
-            print('Mean Validation Loss: {}\n{}\nSamples:\n'.format(
-                np.mean(epoch_loss), '-'*30))
-            # Sample some val sentences randomly
-            for sample_id in random.sample(list(range(len(val_pairs))), 3):
-                print('I: {}\nG: {}\nA: {}\n'.format(
-                    ' '.join(inputs[sample_id]),
-                    ' '.join(generated[sample_id]),
-                    ' '.join(actual[sample_id][0]))
-                )
-
-            # Get BLEU1-BLEU4 scores
-            bleu = metrics.calculate_bleu_scores(generated, actual)
-            print('Validation BLEU (1-4) scores:')
-            print('{bleu1} | {bleu2} | {bleu3} | {bleu4}'.format(**bleu))
-            print('{}{}\n'.format('<'*15, '>'*15))
-
+            performance = metrics.evaluate(actual, generated)
+            writer.add_scalar('data/val_loss', np.mean(epoch_loss), e)
+            writer.add_scalar('metrics/val_accuracy', performance['acc'], e)
+            writer.add_scalar('metrics/val_precision', performance['precision'], e)
+            writer.add_scalar('metrics/val_recall', performance['recall'], e)
+            writer.add_scalar('metrics/val_f1', performance['f1'], e)
             # Save model
             save_snapshot(model, e)
 
             epoch_loss = []
-            inputs = []
             generated = []
             actual = []
 
-            # Get test BLEU scores every 5 epochs
+            # Evaluate on the test set every 5 epochs
             if e > 0 and e % 5 == 0:
                 for iter in range(0, n_test, conf['batch_size']):
                     iter_pairs = test_pairs[iter: iter + conf['batch_size']]
-                    x_test, x_lens, y_test = preprocess._btmcd(vocab,
-                                                               iter_pairs,
-                                                               conf['device'])
-                    outputs, loss = model(x_test, x_lens)
-                    epoch_loss.append(loss.item())
-                    # Get sentences
-                    translate(vocab, outputs, y_test, x_test,
-                              inputs, generated, actual)
+                    x_test = preprocess._btmcd(vocab, iter_pairs, conf['device'])
 
-                print('Mean Test Loss: {}\n{}\nSamples:\n'.format(
-                    np.mean(epoch_loss), '-'*30))
-                # Sample some test sentences randomly
-                for sample_id in random.sample(list(range(len(test_pairs))), 3):
-                    print('I: {}\nG: {}\nA: {}\n'.format(
-                        ' '.join(inputs[sample_id]),
-                        ' '.join(generated[sample_id]),
-                        ' '.join(actual[sample_id][0]))
-                    )
-                bleu = metrics.calculate_bleu_scores(generated, actual)
-                print('Test BLEU (1-4) scores:\n{}'.format('-'*30))
-                print('{bleu1} | {bleu2} | {bleu3} | {bleu4}'.format(**bleu))
-                print('{}{}\n'.format('<'*15, '>'*15))
+                    predictions = model(x_test)
+                    loss = criterion(predictions, y_test[iter: iter + conf['batch_size']])
+                    generated += list(torch.argmax(predictions, dim=1).cpu())
+                    actual += list(y_test[iter: iter + conf['batch_size']].cpu())
+
+                performance = metrics.evaluate(actual, generated)
+                writer.add_scalar('data/test_loss', np.mean(epoch_loss), e)
+                writer.add_scalar('metrics/test_accuracy', performance['acc'], e)
+                writer.add_scalar('metrics/test_precision', performance['precision'], e)
+                writer.add_scalar('metrics/test_recall', performance['recall'], e)
+                writer.add_scalar('metrics/test_f1', performance['f1'], e)
+
+    writer.close()
 
 
 if __name__ == '__main__':

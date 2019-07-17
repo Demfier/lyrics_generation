@@ -46,9 +46,9 @@ def process_raw(config):
         notes_seq = []
         words_seq = []
         for n in note_level:
-            if 'index' not in n:
-                continue
             note = freq2note(n['freq'][0])
+            if 'index' not in n or note < 0:
+                continue
             word_id = n['index']
             curr_line_id = word_level[word_id]['index']
             if not notes_seq:
@@ -78,6 +78,7 @@ def freq2note(freq):
 def create_train_val_split(dataset):
     train, testval = train_test_split(dataset, train_size=0.8)
     test, val = train_test_split(testval, test_size=0.5)
+
     with open('data/processed/train.pkl', 'wb') as f:
         pickle.dump(train, f)
     with open('data/processed/test.pkl', 'wb') as f:
@@ -85,16 +86,6 @@ def create_train_val_split(dataset):
     with open('data/processed/val.pkl', 'wb') as f:
         pickle.dump(val, f)
     print('Split dataset')
-
-
-def load_data(config):
-    with open(config['data_dir'] + 'train.pkl', 'rb') as f:
-        train_set = pickle.load(f)
-    with open(config['data_dir'] + 'test.pkl', 'rb') as f:
-        test_set = pickle.load(f)
-    with open(config['data_dir'] + 'val.pkl', 'rb') as f:
-        val_set = pickle.load(f)
-    return train_set, val_set, test_set
 
 
 # Vocab and file-reading part
@@ -134,11 +125,15 @@ class Vocabulary(object):
 
 
 def build_vocab(config):
-    all_pairs = read_pairs()
+    all_pairs, _ = read_pairs()
     all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
     vocab = Vocabulary()
     for pair in all_pairs:
         vocab.add_sentence(pair[0])
+        for i in pair[1]:
+            if i < 0:
+                continue
+        vocab.add_sentence(' '.join([str(n) for n in pair[1]]))
     print('Vocab size: {}'.format(vocab.size))
     np.save(config['vocab_path'], vocab, allow_pickle=True)
     return vocab
@@ -156,9 +151,28 @@ def read_pairs(mode='all'):
             dataset = pickle.load(f)
 
     pairs = []
+    lines = []
+    notes = []
     for o in dataset:
+        line = normalize_string(o['line'])
+        lines.append(line)
+        notes.append(o['notes'])
         pairs.append((normalize_string('{}'.format(o['line'])), o['notes']))
-    return pairs
+    y = [1] * len(pairs)
+    # create negative samples
+    print('Generating negative samples')
+    random.shuffle(lines)
+    random.shuffle(notes)
+    neg_pairs = list(zip(lines, notes))
+    pairs += neg_pairs
+    y += [0] * len(neg_pairs)
+    x_y = list(zip(pairs, y))
+    random.shuffle(x_y)
+    pairs, y = [], []
+    for p, label in x_y:
+        pairs.append(p)
+        y.append(label)
+    return pairs, torch.tensor(y).long()
 
 
 def normalize_string(x):
@@ -219,49 +233,46 @@ def generate_word_embeddings(vocab, config):
     return torch.from_numpy(combined_embeddings).float()
 
 
-def train_w2v_model(config):
-    all_pairs = read_pairs()
-    all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
-    random.shuffle(all_pairs)
-    src_sentences = []
-    for pair in all_pairs:
-        src_sentences.append(pair[0].split())
-
-    src_w2v = gensim.models.Word2Vec(src_sentences, size=300,
-                                     min_count=1, iter=50)
-    src_w2v.wv.save_word2vec_format('data/raw/english_w2v.bin', binary=True)
-
-
 def load_word_embeddings(config):
     with h5py.File(config['filtered_emb_path'], 'r') as f:
         return torch.from_numpy(np.array(f['data'])).float()
 
 
-def batch_to_model_compatible_data(vocab, sentences):
+def batch_to_model_compatible_data(vocab, pairs, device):
     """
     Returns padded source and target index sequences
     ==================
     Parameters:
     ==================
     vocab (Vocabulary object): Vocabulary built from the dataset
-    pairs (list of tuples): The source and target sentence pairs
+    pairs (list of tuples): The source line and note sequences
     """
     pad_token = vocab.word2index['<PAD>']
     eos_token = vocab.word2index['<EOS>']
-    src_indexes, src_lens = [], []
-    for sent in sentences:
+    src_indexes, src_lens, notes_seq, notes_lens = [], [], [], []
+    for p in pairs:
+        sent, notes = p
         src_indexes.append(vocab.sentence2index(sent) + [eos_token])
         src_lens.append(len(sent.split()))
+        notes_seq.append(notes)
+        notes_lens.append(len(notes))
 
     # pad the batches
     src_indexes = pad_indexes(src_indexes, value=pad_token)
     src_lens = torch.tensor(src_lens)
-    return src_indexes, src_lens
+    notes_seq = pad_indexes(notes_seq, value=pad_token)
+    notes_lens = torch.tensor(notes_lens)
+    return {
+        'lyrics_seq': src_indexes.to(device),
+        'lyrics_lens': src_lens.to(device),
+        'music_seq': notes_seq.to(device),
+        'music_lens': notes_lens.to(device)
+        }
 
 
-def _btmcd(vocab, sentences):
+def _btmcd(vocab, pairs, device):
     """alias for batch_to_model_compatible_data"""
-    return batch_to_model_compatible_data(vocab, sentences)
+    return batch_to_model_compatible_data(vocab, pairs, device)
 
 
 def pad_indexes(indexes_batch, value):
