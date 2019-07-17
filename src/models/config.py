@@ -10,6 +10,7 @@ model_config = {
     'hidden_dim': 256,
     'use_attn?': True,
     'embedding_dim': 300,
+    'bidirectional': True,
     'model_code': 'bilstm_scorer',
     'vocab_path': 'data/processed/vocab.npy',
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
