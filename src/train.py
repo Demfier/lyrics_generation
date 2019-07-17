@@ -70,7 +70,7 @@ def main():
     y_val = y_train.to(conf['device'])
     test_pairs, y_test = preprocess.read_pairs(mode='test')
     y_test = y_train.to(conf['device'])
-    # train_pairs = train_pairs[:1000]
+    # train_pairs = train_pairs[:140000]
     # val_pairs = val_pairs[:500]
     # test_pairs = test_pairs[:500]
     n_train = len(train_pairs)
@@ -135,9 +135,9 @@ def main():
 
                 predictions = model(x_val)
                 loss = criterion(predictions,
-                                 y_val[iter: iter + conf['batch_size']])
+                                 y_val[iter: iter + predictions.shape[0]])
                 generated += list(torch.argmax(predictions, dim=1).cpu())
-                actual += list(y_val[iter: iter + conf['batch_size']].cpu())
+                actual += list(y_val[iter: iter + predictions.shape[0]].cpu())
                 epoch_loss.append(loss.item())
 
             performance = metrics.evaluate(actual, generated)
@@ -160,9 +160,10 @@ def main():
                     x_test = preprocess._btmcd(vocab, iter_pairs, conf['device'])
 
                     predictions = model(x_test)
-                    loss = criterion(predictions, y_test[iter: iter + conf['batch_size']])
+                    loss = criterion(predictions,
+                                     y_test[iter: iter + predictions.shape[0]])
                     generated += list(torch.argmax(predictions, dim=1).cpu())
-                    actual += list(y_test[iter: iter + conf['batch_size']].cpu())
+                    actual += list(y_test[iter: iter + predictions.shape[0]].cpu())
 
                 performance = metrics.evaluate(actual, generated)
                 writer.add_scalar('data/test_loss', np.mean(epoch_loss), e)
