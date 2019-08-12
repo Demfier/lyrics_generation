@@ -8,6 +8,7 @@ import torch
 import gensim
 import pickle
 import random
+import skimage
 import itertools
 import unicodedata
 import numpy as np
@@ -24,6 +25,45 @@ def process_raw(config):
     process dali dataset and construct the train, val and test dataset
     NOTE: DALI info is not being used as we are not dealing with audio for now
     """
+    if config['model_code'] == 'bilstm_scorer':
+        dataset = process_bilstm(config)
+    elif config['model_code'] == 'bimodal_scorer':
+        dataset = process_bimodal(config)
+
+    with open('data/processed/{}/combined_dataset.pkl'.format(
+            config['model_code']), 'wb') as f:
+        pickle.dump(dataset, f)
+    print('Created processed dataset')
+    return dataset
+
+
+def process_bimodal(config):
+    print('Loading DALI')
+    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
+                                               skip=[], keep=[])
+    dataset = []
+    spec_path = '{}spectrograms/'.format(config['data_dir'])
+    file_ids = [p.split('.')[0] for p in os.listdir(spec_path)]
+
+    for f_id in file_ids:
+        sample = {}
+        info = dali_data[f_id].info
+        if config['filter_lang'] and \
+                info['metadata']['language'] != config['filter_lang']:
+            continue
+        sample['lyrics'] = dali_data[f_id].annotations['annot']['lines']
+        sample['mel_spec'] = read_spectrogram('{}{}.png'.format(spec_path, f_id))
+        dataset.append(sample)
+    return dataset
+
+
+def read_spectrogram(spectrogram_path):
+    spec_arr = skimage.io.imread(spectrogram_path)
+    # remove alpha dimension and resize to 224x224
+    return skimage.transform.resize(spec_arr[:, :, :3], (224, 224, 3))
+
+
+def process_bilstm(config):
     # This step takes a bit of time
     print('Loading DALI')
     dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
@@ -66,24 +106,22 @@ def process_raw(config):
                 notes_seq = []
                 words_seq = []
                 sample = {}
-    with open('data/processed/combined_dataset.pkl', 'wb') as f:
-        pickle.dump(dataset, f)
-    print('Created processed dataset')
+    return dataset
 
 
 def freq2note(freq):
     return np.round(12 * np.log2(freq/440.) + 69).astype(int)
 
 
-def create_train_val_split(dataset):
+def create_train_val_split(dataset, config):
     train, testval = train_test_split(dataset, train_size=0.8)
     test, val = train_test_split(testval, test_size=0.5)
 
-    with open('data/processed/train.pkl', 'wb') as f:
+    with open('data/processed/{}/train.pkl'.format(config['model_code']), 'wb') as f:
         pickle.dump(train, f)
-    with open('data/processed/test.pkl', 'wb') as f:
+    with open('data/processed/{}/test.pkl'.format(config['model_code']), 'wb') as f:
         pickle.dump(test, f)
-    with open('data/processed/val.pkl', 'wb') as f:
+    with open('data/processed/{}/val.pkl'.format(config['model_code']), 'wb') as f:
         pickle.dump(val, f)
     print('Split dataset')
 
@@ -125,10 +163,14 @@ class Vocabulary(object):
 
 
 def build_vocab(config):
-    all_pairs, _ = read_pairs()
-    all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
+    all_pairs, _ = read_pairs(config)
+    # all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
     vocab = Vocabulary()
     for pair in all_pairs:
+        if config['model_code'] == 'bimodal_scorer':
+            vocab.add_sentence(pair[0][0])
+            continue
+
         vocab.add_sentence(pair[0])
         for i in pair[1]:
             if i < 0:
@@ -139,17 +181,43 @@ def build_vocab(config):
     return vocab
 
 
-def read_pairs(mode='all'):
+def read_pairs(config, mode='all'):
     """
     Reads src-target sentence pairs given a mode
     """
+    processed_data_path = 'data/processed/{}/'.format(config['model_code'])
     if mode == 'all':
-        with open('data/processed/combined_dataset.pkl', 'rb') as f:
+        with open('{}combined_dataset.pkl'.format(processed_data_path), 'rb') as f:
             dataset = pickle.load(f)
     else:  # if mode == 'train' / 'val' / 'test'
-        with open('data/processed/{}.pkl'.format(mode), 'rb') as f:
+        with open('{}{}.pkl'.format(processed_data_path, mode), 'rb') as f:
             dataset = pickle.load(f)
 
+    if config['model_code'] == 'bilstm_scorer':
+        return read4bilstm(dataset)
+    elif config['model_code'] == 'bimodal_scorer':
+        return read4bimodal(dataset)
+
+
+def read4bimodal(dataset):
+    lyrics_list = []
+    mel_specs = []
+    for v in dataset:
+        mel_spec = v['mel_spec']
+        for l in v['lyrics']:
+            line = normalize_string(l['text'])
+            lyrics_list.append(line)
+            mel_specs.append(mel_spec)
+    pairs = list(zip(lyrics_list, mel_specs))
+    y = [1] * len(pairs) + [0] * len(pairs)
+    # neg sampling
+    np.random.shuffle(lyrics_list)
+    np.random.shuffle(mel_specs)
+    pairs += list(zip(lyrics_list, mel_specs))
+    return pairs, torch.tensor(y).long()
+
+
+def read4bilstm(dataset):
     pairs = []
     lines = []
     notes = []
@@ -161,13 +229,13 @@ def read_pairs(mode='all'):
     y = [1] * len(pairs)
     # create negative samples
     print('Generating negative samples')
-    random.shuffle(lines)
-    random.shuffle(notes)
+    np.random.shuffle(lines)
+    np.random.shuffle(notes)
     neg_pairs = list(zip(lines, notes))
     pairs += neg_pairs
     y += [0] * len(neg_pairs)
     x_y = list(zip(pairs, y))
-    random.shuffle(x_y)
+    np.random.shuffle(x_y)
     pairs, y = [], []
     for p, label in x_y:
         pairs.append(p)
@@ -238,7 +306,7 @@ def load_word_embeddings(config):
         return torch.from_numpy(np.array(f['data'])).float()
 
 
-def batch_to_model_compatible_data(vocab, pairs, device):
+def batch_to_model_compatible_data_bilstm(vocab, pairs, device):
     """
     Returns padded source and target index sequences
     ==================
@@ -270,9 +338,40 @@ def batch_to_model_compatible_data(vocab, pairs, device):
         }
 
 
-def _btmcd(vocab, pairs, device):
+def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
+    """
+    Returns padded source and target index sequences
+    ==================
+    Parameters:
+    ==================
+    vocab (Vocabulary object): Vocabulary built from the dataset
+    pairs (list of tuples): The source line and note sequences
+    """
+    pad_token = vocab.word2index['<PAD>']
+    eos_token = vocab.word2index['<EOS>']
+    src_indexes, src_lens, mel_specs = [], [], []
+    for p in pairs:
+        sent, mel_spec = p
+        src_indexes.append(vocab.sentence2index(sent) + [eos_token])
+        src_lens.append(len(sent.split()))
+        mel_specs.append(mel_spec)
+
+    # pad the batches
+    src_indexes = pad_indexes(src_indexes, value=pad_token)
+    src_lens = torch.tensor(src_lens)
+    return {
+        'lyrics_seq': src_indexes.to(device),
+        'lyrics_lens': src_lens.to(device),
+        'mel_spec': mel_specs.to(device)
+        }
+
+
+def _btmcd(vocab, pairs, device, config):
     """alias for batch_to_model_compatible_data"""
-    return batch_to_model_compatible_data(vocab, pairs, device)
+    if config['model_code'] == 'bilstm_scorer':
+        return batch_to_model_compatible_data_bilstm(vocab, pairs, device)
+    elif config['model_code'] == 'bimodal_scorer':
+        return batch_to_model_compatible_data_bimodal(vocab, pairs, device)
 
 
 def pad_indexes(indexes_batch, value):

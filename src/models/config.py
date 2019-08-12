@@ -7,21 +7,22 @@ model_config = {
     'dropout': 0.3,
     'n_epochs': 500,
     'MAX_LENGTH': 30,
-    'batch_size': 300,
     'hidden_dim': 256,
-    'use_attn?': True,
+    'batch_size': 300,
+    'use_attn?': False,
+    'first_run?': True,
+    'filter_lang': None,
     'embedding_dim': 300,
     'bidirectional': True,
-    'model_code': 'bilstm_scorer',
+    'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
+    'use_embeddings?': True,
+    'pretrained_model': False,
+    'save_dir': 'saved_models/',
+    'data_dir': 'data/processed/',
+    'model_code': 'bimodal_scorer',
     'vocab_path': 'data/processed/vocab.npy',
+    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
     'dali_path': '/home/gsahu/code/lyrics_generation/data/raw/DALI_v1.0/',
     'dali_audio': '/home/gsahu/code/lyrics_generation/data/raw/dali_audio/',  # Path to store dali audio files
-    'data_dir': 'data/processed/',
-    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
-    'use_embeddings?': True,
-    'first_run?': True,
-    'bidirectional': True,
-    'pretrained_model': False,
-    'save_dir': 'saved_models/'
 }

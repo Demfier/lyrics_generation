@@ -64,15 +64,12 @@ def main():
 
     vocab = load_vocabulary()
     print('Loading train, validation and test pairs.')
-    train_pairs, y_train = preprocess.read_pairs(mode='train')
+    train_pairs, y_train = preprocess.read_pairs(conf, mode='train')
     y_train = y_train.to(conf['device'])
-    val_pairs, y_val = preprocess.read_pairs(mode='val')
+    val_pairs, y_val = preprocess.read_pairs(conf, mode='val')
     y_val = y_train.to(conf['device'])
-    test_pairs, y_test = preprocess.read_pairs(mode='test')
+    test_pairs, y_test = preprocess.read_pairs(conf, mode='test')
     y_test = y_train.to(conf['device'])
-    # train_pairs = train_pairs[:140000]
-    # val_pairs = val_pairs[:500]
-    # test_pairs = test_pairs[:500]
     n_train = len(train_pairs)
     train_pairs = train_pairs[: conf['batch_size'] * (
         n_train // conf['batch_size'])]
@@ -83,7 +80,10 @@ def main():
     embedding_wts = get_embedding_wts(vocab) if conf['use_embeddings?'] else None
     print('Building model.')
     print(embedding_wts.shape)
-    model = RNNScorer(conf, embedding_wts, 2)
+    if conf['model_code'] == 'bilstm_scorer':
+        model = RNNScorer(conf, embedding_wts, 2)
+    elif conf['model_code'] == 'bimodal_scorer':
+        model = BiModalScorer(conf, embedding_wts, 2)
     model = model.to(device)
     criterion = nn.CrossEntropyLoss(reduction='sum')
     optimizer = optim.Adam(model.parameters(), lr=conf['lr'])

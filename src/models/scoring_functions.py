@@ -7,6 +7,7 @@ import pickle
 import numpy as np
 from torch import nn, optim
 import torch.nn.functional as F
+from torchvision.models import vgg16
 
 
 class RNNScorer(nn.Module):
@@ -23,13 +24,6 @@ class RNNScorer(nn.Module):
         self.bidirectional = config['bidirectional']
         self.unit = config['unit']
         self.pf = (2 if self.bidirectional else 1)
-        self.Wy = nn.Linear(self.pf*self.config['hidden_dim'],
-                            self.pf*self.config['hidden_dim'],
-                            bias=False)
-        self.Wh = nn.Linear(self.pf*self.config['hidden_dim'],
-                            self.pf*self.config['hidden_dim'],
-                            bias=False)
-        self.w = nn.Linear(self.pf*self.config['hidden_dim'], 1, bias=False)
         self.avg_pool = True
 
         if self.unit == 'lstm':
@@ -54,26 +48,6 @@ class RNNScorer(nn.Module):
         self.out = nn.Linear(4*self.pf*self.config['hidden_dim'], self.output_dim)
         self.softmax = F.softmax
         self.use_attn = config['use_attn?']
-
-    def attn(self, rnn_output, pool):
-        M_left = self.Wy(rnn_output)
-        # (2d, 2d)(bts, n, 2d) = (bts, n, 2d)
-        M_right = self.Wh(pool).unsqueeze(2)
-        # (2d,2d)(bts,2d) = (bts,2d)
-        # (bts, 2d, 1)
-        M_right = M_right.repeat(1, 1, rnn_output.shape[1])
-        # (bts, 2d, n)
-        M_right = M_right.permute(0, 2, 1)
-        M = torch.add(M_left, M_right)
-        M = torch.tanh(M)
-        attn_wts = self.w(M)
-        # (2d,1)(bts,n,2d) = (bts, n, 1)
-        soft_attn_wts = F.softmax(attn_wts, dim=1)  # along n
-        soft_attn_wts = soft_attn_wts.permute(0, 2, 1)
-        new_encoded = torch.bmm(soft_attn_wts, rnn_output)
-        # (bts, 1, n)(bts, n, 2d) = (bts, 1, 2d)
-        new_encoded = new_encoded.squeeze(1)
-        return new_encoded
 
     def pool(self, rnn_output):
 
@@ -117,3 +91,88 @@ class RNNScorer(nn.Module):
         fused = self.fusion(music, lyrics)
 
         return self.out(fused)
+
+
+class BiModalScorer(RNNScorer):
+    """
+    Takes inputs from two different modalities and returns a
+    compatibility score
+    """
+    def __init__(self, config, embedding_wts, n_lables):
+        super(BiModalScorer, self).__init__()
+        self.config = config
+        self.dropout = config['dropout']
+        self.embedding_wts = embedding_wts
+        self.output_dim = n_lables
+        self.embedding = nn.Embedding.from_pretrained(embedding_wts,
+                                                      freeze=False)
+        self.embedding_dropout = nn.Dropout(config['dropout'])
+        self.bidirectional = config['bidirectional']
+        self.unit = config['unit']
+        self.pf = (2 if self.bidirectional else 1)
+        self.w = nn.Linear(self.pf*self.config['hidden_dim'], 1, bias=False)
+        self.avg_pool = True
+
+        if self.unit == 'lstm':
+            self.rnn = nn.LSTM(self.config['embedding_dim'],
+                               self.config['hidden_dim'],
+                               num_layers=self.config['n_layers'],
+                               dropout=self.dropout,
+                               bidirectional=self.bidirectional)
+        elif self.unit == 'gru':
+            self.rnn = nn.GRU(self.config['embedding_dim'],
+                              self.config['hidden_dim'],
+                              num_layers=self.config['n_layers'],
+                              dropout=self.dropout,
+                              bidirectional=self.bidirectional)
+        else:  # basic rnn
+            self.rnn = nn.RNN(self.config['embedding_dim'],
+                              self.config['hidden_dim'],
+                              num_layers=self.config['n_layers'],
+                              dropout=self.dropout,
+                              bidirectional=self.bidirectional)
+
+        self.img_encoder = vgg16(pretrained=True)
+        # Keep the last layer trainable
+        for p in self.img_encoder.classifier.parameters():
+            p.requires_grad = True
+
+        # We will concatenate img and lyrics features, so input size becomes
+        # 1000 (from vgg16) + 2*hidden_dim (from rnn)
+        self.final_in_features = \
+            self.img_encoder.classifier[6].out_features + \
+            self.pf*self.config['hidden_dim']
+
+        self.out = nn.Sequential(
+            nn.Linear(self.final_in_features, self.final_in_features // 2),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.final_in_features // 2, self.output_dim))
+
+    def pool(self, rnn_output):
+
+        if self.avg_pool:
+            rnn_output = F.avg_pool1d(rnn_output, rnn_output.size(2))
+        else:
+            rnn_output = F.max_pool1d(rnn_output, rnn_output.size(2))
+
+        return rnn_output.squeeze(2)
+
+    def fusion(self, music, lyrics):
+        return torch.cat((music, lyrics), dim=-1)
+
+    def forward(self, x_train):
+
+        # batch_size, num_channels, width, height (bs, 3, 256, 256) when
+        # use_melfeats? in False else (batch_size, 1000)
+        music_melspec = self.embedding(x_train['mel_spec'])
+        # batch_size, max_sequence_length, embedding_dim
+        lyrics_embeddings = self.embedding(x_train['lyrics_seq'])
+        if self.config['use_melfeats?']:
+            # batch_size, 1000
+            music_features = self.img_encoder(music_spectrogram)
+        else:
+            music_features = music_melspec
+
+        lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
+        lyrics_pool = self.pool(lyrics_output.permute(1, 2, 0))
+        return self.out(self.fusion(music, lyrics))
