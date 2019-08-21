@@ -175,17 +175,17 @@ class Vocabulary(object):
 
 def build_vocab(config):
     all_pairs, _ = read_pairs(config)
-    all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
+    all_pairs = filter_pairs(all_pairs, config)
     vocab = Vocabulary()
-    for pair in all_pairs:
-        vocab.add_sentence(pair[0])
+    for pair_or_s in all_pairs:
         if config['model_code'] == 'bimodal_scorer':
+            # pair_or_s -> a sentence
+            vocab.add_sentence(pair_or_s)
             continue
 
-        for i in pair[1]:
-            if i < 0:
-                continue
-        vocab.add_sentence(' '.join([str(n) for n in pair[1]]))
+        # pair_or_s -> a tuple with two sentences
+        vocab.add_sentence(pair_or_s[0])
+        vocab.add_sentence(pair_or_s[1])
     print('Vocab size: {}'.format(vocab.size))
     np.save(config['vocab_path'], vocab, allow_pickle=True)
     return vocab
@@ -281,7 +281,7 @@ def unicode_to_ascii(x):
         if unicodedata.category(c) != 'Mn')
 
 
-def filter_pairs(pairs, max_len):
+def filter_pairs(pairs, config):
     """
     Filter pairs with either of the sentence > max_len tokens
     ==============
@@ -290,7 +290,14 @@ def filter_pairs(pairs, max_len):
     pairs (list of tuples): each tuple is a src-target sentence pair
     max_len (Int): Max allowable sentence length
     """
-    return [(' '.join(pair[0].split()[:max_len]), pair[1]) for pair in pairs if pair[0]]
+    max_len = config['MAX_LENGTH']
+    if config['model_code'] == 'bimodal_scorer':
+        # No need to return those big matrices
+        return [' '.join(pair[0].split()[:max_len])
+                for pair in pairs if pair[0]]
+    return [(' '.join(pair[0].split()[:max_len]),
+             ' '.join(pair[1].split()[:max_len]))
+            for pair in pairs if pair[0] and pair[1]]
 
 
 # Embeddings part

@@ -48,7 +48,7 @@ def get_embedding_wts(vocab):
 
 def save_snapshot(model, epoch_num):
     if not os.path.exists(conf['save_dir']):
-            os.mkdirs(conf['save_dir'])
+        os.mkdirs(conf['save_dir'])
     torch.save({
         'model': model.state_dict(),
         'epoch': epoch_num
@@ -80,7 +80,6 @@ def main():
     device = conf['device'] if torch.cuda.is_available() else 'cpu'
     embedding_wts = get_embedding_wts(vocab) if conf['use_embeddings?'] else None
     print('Building model.')
-    print(embedding_wts.shape)
     if conf['model_code'] == 'bilstm_scorer':
         model = RNNScorer(conf, embedding_wts, 2)
     elif conf['model_code'] == 'bimodal_scorer':
