@@ -20,7 +20,7 @@ model_config = {
     'pretrained_model': False,
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
-    'model_code': 'bimodal_scorer',
+    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer
     'vocab_path': 'data/processed/vocab.npy',
     'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
