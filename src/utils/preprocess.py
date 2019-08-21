@@ -219,7 +219,7 @@ def read4bimodal(dataset):
             lyrics_list.append(line)
             mel_specs.append(mel_spec)
     pairs = list(zip(lyrics_list, mel_specs))
-    y = [1] * len(pairs) + [0] * len(pairs)
+    y = [1] * len(pairs) + [-1] * len(pairs)
     # neg sampling
     np.random.shuffle(lyrics_list)
     np.random.shuffle(mel_specs)
@@ -252,7 +252,7 @@ def read4bilstm(dataset):
     np.random.shuffle(notes)
     neg_pairs = list(zip(lines, notes))
     pairs += neg_pairs
-    y += [0] * len(neg_pairs)
+    y += [-1] * len(neg_pairs)
     x_y = list(zip(pairs, y))
     np.random.shuffle(x_y)
     pairs, y = [], []

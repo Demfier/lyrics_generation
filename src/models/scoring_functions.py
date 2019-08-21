@@ -10,12 +10,12 @@ from torchvision.models import vgg16
 
 class RNNScorer(nn.Module):
     """docstring for BiRNNScorer"""
-    def __init__(self, config, embedding_wts, n_lables):
+    def __init__(self, config, embedding_wts):
         super(RNNScorer, self).__init__()
         self.config = config
         self.dropout = config['dropout']
         self.embedding_wts = embedding_wts
-        self.output_dim = n_lables
+        self.output_dim = 1
         self.embedding = nn.Embedding.from_pretrained(embedding_wts,
                                                       freeze=False)
         self.embedding_dropout = nn.Dropout(config['dropout'])
@@ -44,7 +44,6 @@ class RNNScorer(nn.Module):
                               bidirectional=self.bidirectional)
 
         self.out = nn.Linear(4*self.pf*self.config['hidden_dim'], self.output_dim)
-        self.softmax = F.softmax
         self.use_attn = config['use_attn?']
 
     def pool(self, rnn_output):
@@ -96,12 +95,12 @@ class BiModalScorer(nn.Module):
     Takes inputs from two different modalities and returns a
     compatibility score
     """
-    def __init__(self, config, embedding_wts, n_lables):
+    def __init__(self, config, embedding_wts):
         super(BiModalScorer, self).__init__()
         self.config = config
         self.dropout = config['dropout']
         self.embedding_wts = embedding_wts
-        self.output_dim = n_lables
+        self.output_dim = 1  # we want to return a score
         self.embedding = nn.Embedding.from_pretrained(embedding_wts,
                                                       freeze=False)
         self.embedding_dropout = nn.Dropout(config['dropout'])

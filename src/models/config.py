@@ -1,7 +1,7 @@
 import torch
 model_config = {
     'clip': 50,
-    'lr': 0.001,
+    'lr': 1e-3,
     'n_layers': 2,
     'unit': 'lstm',
     'dropout': 0.3,
@@ -22,7 +22,7 @@ model_config = {
     'data_dir': 'data/processed/',
     'model_code': 'bimodal_scorer',
     'vocab_path': 'data/processed/vocab.npy',
-    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
     'dali_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
     'dali_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files

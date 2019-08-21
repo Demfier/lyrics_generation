@@ -81,11 +81,11 @@ def main():
     embedding_wts = get_embedding_wts(vocab) if conf['use_embeddings?'] else None
     print('Building model.')
     if conf['model_code'] == 'bilstm_scorer':
-        model = RNNScorer(conf, embedding_wts, 2)
+        model = RNNScorer(conf, embedding_wts)
     elif conf['model_code'] == 'bimodal_scorer':
-        model = BiModalScorer(conf, embedding_wts, 2)
+        model = BiModalScorer(conf, embedding_wts)
     model = model.to(device)
-    criterion = nn.CrossEntropyLoss(reduction='sum')
+    criterion = nn.HingeEmbeddingLoss()
     optimizer = optim.Adam(model.parameters(), lr=conf['lr'])
     if conf['pretrained_model']:
         print('Restoring {}...'.format(conf['pretrained_model']))
@@ -114,10 +114,10 @@ def main():
             x_train = preprocess._btmcd(vocab, iter_pairs, conf)
             # forward pass through the model
             predictions = model(x_train)
-            # y_train -> (1, bs)
-            loss = criterion(predictions, y_train[iter: iter + conf['batch_size']])
+            # y_train -> (bs)
+            scores, _ = torch.max(predictions, dim=1)
+            loss = criterion(scores, y_train[iter: iter + conf['batch_size']])
             loss.backward()
-            predictions = torch.argmax(predictions, dim=1).cpu()
             nn.utils.clip_grad_norm_(model.parameters(), conf['clip'])
             optimizer.step()
             epoch_loss.append(loss.item())
@@ -135,8 +135,9 @@ def main():
                 x_val = preprocess._btmcd(vocab, iter_pairs, conf)
 
                 predictions = model(x_val)
-                loss = criterion(predictions,
-                                 y_val[iter: iter + predictions.shape[0]])
+                scores, _ = torch.max(predictions, dim=1)
+                loss = criterion(scores,
+                                 y_val[iter: iter + scores.shape[0]])
                 generated += list(torch.argmax(predictions, dim=1).cpu())
                 actual += list(y_val[iter: iter + predictions.shape[0]].cpu())
                 epoch_loss.append(loss.item())
@@ -161,8 +162,9 @@ def main():
                     x_test = preprocess._btmcd(vocab, iter_pairs, conf)
 
                     predictions = model(x_test)
-                    loss = criterion(predictions,
-                                     y_test[iter: iter + predictions.shape[0]])
+                    scores, _ = torch.max(predictions, dim=1)
+                    loss = criterion(scores,
+                                     y_test[iter: iter + scores.shape[0]])
                     generated += list(torch.argmax(predictions, dim=1).cpu())
                     actual += list(y_test[iter: iter + predictions.shape[0]].cpu())
 
