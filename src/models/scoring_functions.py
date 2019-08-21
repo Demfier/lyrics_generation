@@ -1,12 +1,10 @@
 """
 This file contains code for the scoring function (an LSTM Classifier)
 """
-import sys
 import torch
-import pickle
-import numpy as np
-from torch import nn, optim
+from torch import nn
 import torch.nn.functional as F
+
 from torchvision.models import vgg16
 
 
@@ -93,7 +91,7 @@ class RNNScorer(nn.Module):
         return self.out(fused)
 
 
-class BiModalScorer(RNNScorer):
+class BiModalScorer(nn.Module):
     """
     Takes inputs from two different modalities and returns a
     compatibility score
@@ -160,19 +158,27 @@ class BiModalScorer(RNNScorer):
     def fusion(self, music, lyrics):
         return torch.cat((music, lyrics), dim=-1)
 
+    def encoder(self, embedded):
+        if self.unit == 'lstm':
+            rnn_output, (hidden, _) = self.rnn(embedded)
+        else:  # gru/rnn
+            rnn_output, hidden = self.rnn(embedded)
+
+        return rnn_output, hidden
+
     def forward(self, x_train):
 
-        # batch_size, num_channels, width, height (bs, 3, 256, 256) when
+        # batch_size, num_channels, width, height (bs, 3, 224, 224) when
         # use_melfeats? in False else (batch_size, 1000)
-        music_melspec = self.embedding(x_train['mel_spec'])
+        music_melspec = x_train['mel_spec']
         # batch_size, max_sequence_length, embedding_dim
         lyrics_embeddings = self.embedding(x_train['lyrics_seq'])
         if self.config['use_melfeats?']:
-            # batch_size, 1000
-            music_features = self.img_encoder(music_spectrogram)
+            raise NotImplementedError('Using direct image features not supported yet.')
         else:
-            music_features = music_melspec
+            # batch_size, 1000
+            music_features = self.img_encoder(music_melspec)
 
         lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
         lyrics_pool = self.pool(lyrics_output.permute(1, 2, 0))
-        return self.out(self.fusion(music, lyrics))
+        return self.out(self.fusion(music_features, lyrics_pool))

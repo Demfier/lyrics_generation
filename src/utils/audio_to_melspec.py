@@ -11,7 +11,11 @@ SPEC_DIR = 'data/processed/spectrograms/'
 
 for a in tqdm(os.listdir(OGG_DIR)):
     y, _ = librosa.load('{}{}'.format(OGG_DIR, a))
+    plt.figure(a)
+    plt.axis('off')
+    plt.axes([0., 0., 1., 1.], frameon=False, xticks=[], yticks=[]) # Remove the white edge
     s = librosa.feature.melspectrogram(y)
     specshow(librosa.power_to_db(s, ref=np.max), fmax=8000)
     plt.tight_layout()
     plt.savefig('{}{}.png'.format(SPEC_DIR, a.split('.')[0]), bbox_inches='tight')
+    plt.close(a)  # very important, or else, memory bloats, takes forever for the loop to finish

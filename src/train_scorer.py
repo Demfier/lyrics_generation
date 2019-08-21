@@ -3,6 +3,7 @@ import h5py
 import random
 import argparse
 import numpy as np
+from tqdm import tqdm
 
 import torch
 from torch import nn, optim
@@ -11,7 +12,7 @@ from tensorboardX import SummaryWriter
 
 from utils import preprocess, metrics
 from models.config import model_config as conf
-from models.scoring_functions import RNNScorer
+from models.scoring_functions import RNNScorer, BiModalScorer
 
 
 def load_vocabulary():
@@ -98,7 +99,8 @@ def main():
         epoch = 0
     print(model)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('Total {} trainable parameters'.format(num_params))
+    print('#Train: {} | #Test: {} | #Val: {} | #Params: {}'.format(
+        n_train, n_test, n_val, num_params))
 
     print('Training started..')
     for e in range(epoch, conf['n_epochs']):
@@ -106,11 +108,11 @@ def main():
         optimizer.zero_grad()
         epoch_loss = []
         # Train for an epoch
-        for iter in range(0, n_train, conf['batch_size']):
+        for iter in tqdm(range(0, n_train, conf['batch_size'])):
             iter_pairs = train_pairs[iter: iter + conf['batch_size']]
             if len(iter_pairs) == 0:  # handle the strange error
                 continue
-            x_train = preprocess._btmcd(vocab, iter_pairs, conf['device'])
+            x_train = preprocess._btmcd(vocab, iter_pairs, conf)
             # forward pass through the model
             predictions = model(x_train)
             # y_train -> (1, bs)
@@ -129,9 +131,9 @@ def main():
             generated = []
             actual = []
             model.eval()
-            for iter in range(0, n_val, conf['batch_size']):
+            for iter in tqdm(range(0, n_val, conf['batch_size'])):
                 iter_pairs = val_pairs[iter: iter + conf['batch_size']]
-                x_val = preprocess._btmcd(vocab, iter_pairs, conf['device'])
+                x_val = preprocess._btmcd(vocab, iter_pairs, conf)
 
                 predictions = model(x_val)
                 loss = criterion(predictions,
@@ -157,7 +159,7 @@ def main():
             if e > 0 and e % 5 == 0:
                 for iter in range(0, n_test, conf['batch_size']):
                     iter_pairs = test_pairs[iter: iter + conf['batch_size']]
-                    x_test = preprocess._btmcd(vocab, iter_pairs, conf['device'])
+                    x_test = preprocess._btmcd(vocab, iter_pairs, conf)
 
                     predictions = model(x_test)
                     loss = criterion(predictions,

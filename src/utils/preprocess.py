@@ -48,9 +48,20 @@ def process_bimodal(config):
     for f_id in file_ids:
         sample = {}
         info = dali_data[f_id].info
-        if config['filter_lang'] and \
-                info['metadata']['language'] != config['filter_lang']:
+
+        if (  # skip if the song doesn't belong to any genre
+            'genres' not in info['metadata']
+            ) or (  # skip if it's in a different language
+            config['filter_lang'] and
+            info['metadata']['language'] != config['filter_lang']
+            ) or (  # skip the entry if it's in a different genre
+                config['filter_genre'] and
+                'genres' in info['metadata'] and
+                config['filter_genre'].intersection(
+                    info['metadata']['genres']) != config['filter_genre']
+                ):
             continue
+        # list of dictionaries
         sample['lyrics'] = dali_data[f_id].annotations['annot']['lines']
         sample['mel_spec'] = read_spectrogram('{}{}.png'.format(spec_path, f_id))
         dataset.append(sample)
@@ -164,14 +175,13 @@ class Vocabulary(object):
 
 def build_vocab(config):
     all_pairs, _ = read_pairs(config)
-    # all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
+    all_pairs = filter_pairs(all_pairs, config['MAX_LENGTH'])
     vocab = Vocabulary()
     for pair in all_pairs:
+        vocab.add_sentence(pair[0])
         if config['model_code'] == 'bimodal_scorer':
-            vocab.add_sentence(pair[0][0])
             continue
 
-        vocab.add_sentence(pair[0])
         for i in pair[1]:
             if i < 0:
                 continue
@@ -214,6 +224,15 @@ def read4bimodal(dataset):
     np.random.shuffle(lyrics_list)
     np.random.shuffle(mel_specs)
     pairs += list(zip(lyrics_list, mel_specs))
+
+    # Shuffle the entire dataset
+    data = list(zip(pairs, y))
+    np.random.shuffle(data)
+    pairs = []
+    y = []
+    for d in data:
+        pairs.append(d[0])
+        y.append(d[1])
     return pairs, torch.tensor(y).long()
 
 
@@ -271,7 +290,7 @@ def filter_pairs(pairs, max_len):
     pairs (list of tuples): each tuple is a src-target sentence pair
     max_len (Int): Max allowable sentence length
     """
-    return [pair for pair in pairs if (len(pair[0].split()) <= max_len)]
+    return [(' '.join(pair[0].split()[:max_len]), pair[1]) for pair in pairs if pair[0]]
 
 
 # Embeddings part
@@ -359,6 +378,8 @@ def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
     # pad the batches
     src_indexes = pad_indexes(src_indexes, value=pad_token)
     src_lens = torch.tensor(src_lens)
+    # make (bs, num_channels, w, h) as vgg accepts image in this format
+    mel_specs = torch.tensor(mel_specs).float().permute(0, 3, 1, 2).contiguous()
     return {
         'lyrics_seq': src_indexes.to(device),
         'lyrics_lens': src_lens.to(device),
@@ -366,12 +387,12 @@ def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
         }
 
 
-def _btmcd(vocab, pairs, device, config):
+def _btmcd(vocab, pairs, config):
     """alias for batch_to_model_compatible_data"""
     if config['model_code'] == 'bilstm_scorer':
-        return batch_to_model_compatible_data_bilstm(vocab, pairs, device)
+        return batch_to_model_compatible_data_bilstm(vocab, pairs, config['device'])
     elif config['model_code'] == 'bimodal_scorer':
-        return batch_to_model_compatible_data_bimodal(vocab, pairs, device)
+        return batch_to_model_compatible_data_bimodal(vocab, pairs, config['device'])
 
 
 def pad_indexes(indexes_batch, value):
