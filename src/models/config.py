@@ -1,7 +1,7 @@
 import torch
 model_config = {
     'clip': 50,
-    'lr': 1e-3,
+    'lr': 1e-4,
     'n_layers': 2,
     'unit': 'lstm',
     'dropout': 0.3,

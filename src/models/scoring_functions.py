@@ -22,6 +22,13 @@ class RNNScorer(nn.Module):
         self.bidirectional = config['bidirectional']
         self.unit = config['unit']
         self.pf = (2 if self.bidirectional else 1)
+        self.Wy = nn.Linear(self.pf*self.config['hidden_dim'],
+                            self.pf*self.config['hidden_dim'],
+                            bias=False)
+        self.Wh = nn.Linear(self.pf*self.config['hidden_dim'],
+                            self.pf*self.config['hidden_dim'],
+                            bias=False)
+        self.w = nn.Linear(self.pf*self.config['hidden_dim'], 1, bias=False)
         self.avg_pool = True
 
         if self.unit == 'lstm':
@@ -45,6 +52,26 @@ class RNNScorer(nn.Module):
 
         self.out = nn.Linear(4*self.pf*self.config['hidden_dim'], self.output_dim)
         self.use_attn = config['use_attn?']
+
+    def attn(self, rnn_output, pool):
+        M_left = self.Wy(rnn_output)
+        # (2d, 2d)(bts, n, 2d) = (bts, n, 2d)
+        M_right = self.Wh(pool).unsqueeze(2)
+        # (2d,2d)(bts,2d) = (bts,2d)
+        # (bts, 2d, 1)
+        M_right = M_right.repeat(1, 1, rnn_output.shape[1])
+        # (bts, 2d, n)
+        M_right = M_right.permute(0, 2, 1)
+        M = torch.add(M_left, M_right)
+        M = torch.tanh(M)
+        attn_wts = self.w(M)
+        # (2d,1)(bts,n,2d) = (bts, n, 1)
+        soft_attn_wts = F.softmax(attn_wts, dim=1)  # along n
+        soft_attn_wts = soft_attn_wts.permute(0, 2, 1)
+        new_encoded = torch.bmm(soft_attn_wts, rnn_output)
+        # (bts, 1, n)(bts, n, 2d) = (bts, 1, 2d)
+        new_encoded = new_encoded.squeeze(1)
+        return new_encoded
 
     def pool(self, rnn_output):
 
