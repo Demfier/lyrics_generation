@@ -138,7 +138,7 @@ def main():
                 scores, _ = torch.max(predictions, dim=1)
                 loss = criterion(scores,
                                  y_val[iter: iter + scores.shape[0]])
-                generated += list(torch.argmax(predictions, dim=1).cpu())
+                generated += [s/np.abs(s) for s in scores.cpu().numpy()]
                 actual += list(y_val[iter: iter + predictions.shape[0]].cpu())
                 epoch_loss.append(loss.item())
 
