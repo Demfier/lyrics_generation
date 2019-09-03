@@ -7,7 +7,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 
-OGG_DIR = 'data/raw/DALI_v1.0/ogg_audio/'
+OGG_DIR = 'data/raw/DALI_v1.0/ogg_audio_splits/'
 SPEC_DIR = 'data/processed/check/'
 
 exitFlag = 0
@@ -47,19 +47,16 @@ def print_time(threadName, s, e, data):
 data = os.listdir(OGG_DIR)
 for i in range(0,1000):
     a = data[i]
-    plt.figure()
+    #plt.figure()
     y, _ = librosa.load('{}{}'.format(OGG_DIR, a))
-    plt.figure(a)
+    plt.figure(i)
     plt.axis('off')
     plt.axes([0., 0., 1., 1.], frameon=False, xticks=[], yticks=[]) # Remove the white edge
     s = librosa.feature.melspectrogram(y)
     specshow(librosa.power_to_db(s, ref=np.max), fmax=8000)
     plt.tight_layout()
     plt.savefig('{}{}.png'.format(SPEC_DIR, a.split('.')[0]), bbox_inches='tight')
-<<<<<<< Updated upstream
-    plt.close(a)  # very important, or else, memory bloats, takes forever for the loop to finish
-=======
-    plt.close()
+    plt.close(i)
     print(i)
 # Create new threads
 #thread1 = myThread("Thread-11", 2000, 2005, data)
