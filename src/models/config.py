@@ -7,10 +7,10 @@ model_config = {
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
     # model-specific hyperparams
-    'anneal_till': 6000,  # for vae
-    'x0': 8000,  # for vae
+    'anneal_till': 3500,  # for vae
+    'x0': 6000,  # for vae
     'k': 5e-3,  # slope of the annealing function (for vae)
-    'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
+    'anneal_type': 'logistic',  # for vae {tanh, logistic, linear}
     'sampling_temperature': 1.0,  # for vae
 
     'clip': 50.0,  # values above which to clip the gradients
@@ -37,7 +37,7 @@ model_config = {
     'MAX_LENGTH': 30,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
