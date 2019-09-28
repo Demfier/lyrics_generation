@@ -120,7 +120,7 @@ def main():
     print(random.choice(train_pairs))
     n_val = len(val_pairs)
     n_test = len(test_pairs)
-    device = conf['device'] if torch.cuda.is_available() else 'cpu'
+    device = conf['device']
     embedding_wts = get_embedding_wts(vocab) if conf['use_embeddings?'] else None
     print('Building model.')
     if conf['model_code'] == 'dae':
@@ -143,7 +143,8 @@ def main():
         epoch = 0
     print(model)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('Total {} trainable parameters'.format(num_params))
+    print('#Train: {} | #Test: {} | #Val: {} | #Params: {}'.format(
+        n_train, n_test, n_val, num_params))
 
     print('Training started..')
     train_iter, val_iter, test_iter = 0, 0, 0

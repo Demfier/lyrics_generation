@@ -131,8 +131,9 @@ def process_ae(config):
     for l in lyrics_info:
         line, spec_path = l.split('\t')
         # get_subsequences() includes the complete sentence as well
-        for subseq in get_subsequences(line):
-            dataset.append(subseq.strip())
+        # for subseq in get_subsequences(line):
+        #     dataset.append(subseq.strip())
+        dataset.append(line)
     return list(set(dataset))
 
 

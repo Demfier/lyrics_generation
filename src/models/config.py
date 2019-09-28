@@ -11,7 +11,7 @@ model_config = {
     'x0': 6000,  # for vae
     'k': 5e-3,  # slope of the annealing function (for vae)
     'anneal_type': 'logistic',  # for vae {tanh, logistic, linear}
-    'sampling_temperature': 1.0,  # for vae
+    'sampling_temperature': 5e-3,  # for vae
 
     'clip': 50.0,  # values above which to clip the gradients
     'tf_ratio': 1.0,  # teacher forcing ratio
@@ -37,23 +37,21 @@ model_config = {
     'MAX_LENGTH': 30,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cpu' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
     'use_embeddings?': True,  # use word embeddings or not
-    'first_run?': True,  # True for the very first run
+    'first_run?': False,  # True for the very first run
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
     'n_layers': 2,
-    'use_attn?': False,
-    'first_run?': True,
     'filter_lang': 'english',
     'filter_genre': {'Pop'},
     'embedding_dim': 300,
     'bidirectional': True,
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
-    'pretrained_model': False,
+    'pretrained_model': 'rec/vae-1L-bilstm-40',
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
     'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae
