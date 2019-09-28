@@ -113,14 +113,14 @@ def process_bilstm(config):
                 words_seq.append(n['text'])
             else:
                 sample['notes'] = notes_seq
-                sample['line_sanity'] = ' '.join(words_seq)
-                sample['line'] = line_level[line_id]['text']
-                dataset.append(sample)
+                for subseq in get_subsequences(line_level[line_id]['text']):
+                    sample['line'] = subseq.strip()
+                    dataset.append(sample)
                 line_id = curr_line_id
                 notes_seq = []
                 words_seq = []
                 sample = {}
-    return dataset
+    return uniq_dictlist(dataset)
 
 
 def process_ae(config):
@@ -130,9 +130,20 @@ def process_ae(config):
         lyrics_info = f.readlines()
     for l in lyrics_info:
         line, spec_path = l.split('\t')
-        sample = {'line': line.strip(), 'spec_path': spec_path.strip()}
-        dataset.append(sample)
-    return dataset
+        # get_subsequences() includes the complete sentence as well
+        # for subseq in get_subsequences(line):
+        #     dataset.append(subseq.strip())
+        dataset.append(line)
+    return list(set(dataset))
+
+
+def get_subsequences(line):
+    line = line.split()
+    return [' '.join(line[:i]) for i in range(1, len(line))]
+
+
+def uniq_dictlist(list_of_dict):
+    return list({v['id']: v for v in list_of_dict}.values())
 
 
 def freq2note(freq):
@@ -193,7 +204,7 @@ def build_vocab(config):
     all_pairs = filter_pairs(all_pairs, config)
     vocab = Vocabulary()
     for pair_or_s in all_pairs:
-        if config['model_code'] in {'dae', 'vae', 'bimodal_scorer'}:
+        if config['model_code'] == 'bimodal_scorer':
             # pair_or_s -> a sentence
             vocab.add_sentence(pair_or_s)
             continue
@@ -282,7 +293,7 @@ def read4bilstm(dataset):
 def read4ae(dataset):
     pairs = []
     for o in dataset:
-        line = normalize_string(o['line'])
+        line = normalize_string(o)
         pairs.append([line, line])
     return pairs, []
 
@@ -381,20 +392,25 @@ def batch_to_model_compatible_data_bilstm(vocab, pairs, device):
     vocab (Vocabulary object): Vocabulary built from the dataset
     pairs (list of tuples): The source line and note sequences
     """
+    sos_token = vocab.word2index['<SOS>']
     pad_token = vocab.word2index['<PAD>']
     eos_token = vocab.word2index['<EOS>']
     src_indexes, src_lens, notes_seq, notes_lens = [], [], [], []
-    for p in pairs:
-        sent, notes = p
-        src_indexes.append(vocab.sentence2index(sent) + [eos_token])
-        src_lens.append(len(sent.split()))
+    for pair in pairs:
+        sent, notes = pair
+        src_indexes.append(
+            torch.tensor(
+                [sos_token] + vocab.sentence2index(pair[0]) + [eos_token]
+                ))
+        # extra 2 for sos_token and eos_token
+        src_lens.append(len(pair[0].split()) + 2)
         notes_seq.append(notes)
         notes_lens.append(len(notes))
 
     # pad the batches
-    src_indexes = pad_indexes(src_indexes, value=pad_token)
+    src_indexes = pad_sequence(src_indexes, padding_value=pad_token)
     src_lens = torch.tensor(src_lens)
-    notes_seq = pad_indexes(notes_seq, value=pad_token)
+    notes_seq = pad_sequence(notes_seq, padding_value=pad_token)
     notes_lens = torch.tensor(notes_lens)
     return {
         'lyrics_seq': src_indexes.to(device),
@@ -413,17 +429,22 @@ def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
     vocab (Vocabulary object): Vocabulary built from the dataset
     pairs (list of tuples): The source line and note sequences
     """
+    sos_token = vocab.word2index['<SOS>']
     pad_token = vocab.word2index['<PAD>']
     eos_token = vocab.word2index['<EOS>']
     src_indexes, src_lens, mel_specs = [], [], []
-    for p in pairs:
-        sent, mel_spec = p
-        src_indexes.append(vocab.sentence2index(sent) + [eos_token])
-        src_lens.append(len(sent.split()))
+    for pair in pairs:
+        sent, mel_spec = pair
+        src_indexes.append(
+            torch.tensor(
+                [sos_token] + vocab.sentence2index(pair[0]) + [eos_token]
+                ))
+        # extra 2 for sos_token and eos_token
+        src_lens.append(len(pair[0].split()) + 2)
         mel_specs.append(mel_spec)
 
     # pad the batches
-    src_indexes = pad_indexes(src_indexes, value=pad_token)
+    src_indexes = pad_sequence(src_indexes, padding_value=pad_token)
     src_lens = torch.tensor(src_lens)
     # make (bs, num_channels, w, h) as vgg accepts image in this format
     mel_specs = torch.tensor(mel_specs).float().permute(0, 3, 1, 2).contiguous()

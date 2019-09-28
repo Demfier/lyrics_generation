@@ -81,6 +81,18 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         else:  # linear
             return min(1, step/self.x0)
 
+    def _random_sample(self, n):
+        z = torch.randn(n, self.latent_dim).unsqueeze(0)
+        y = (torch.ones(self.config['MAX_LENGTH'], n) * self.sos_idx).long()
+        return self._decode(z.to(self.device), y.to(self.device), infer=True)
+
+    def _interpolate(self, z1, z2, steps):
+        y = (torch.ones(self.config['MAX_LENGTH'], steps + 2) * self.sos_idx).long()
+        z = torch.tensor(np.linspace(z1, z2, steps)).squeeze().unsqueeze(0)
+        z = torch.cat((z1, z), dim=1)
+        z = torch.cat((z, z2), dim=1)
+        return self._decode(z.to(self.device), y.to(self.device), infer=True)
+
     def forward(self, x, x_lens, step=None, y=None):
         """
         Performs one forward pass through the network, i.e., encodes x,

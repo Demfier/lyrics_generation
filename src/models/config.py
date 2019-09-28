@@ -7,11 +7,11 @@ model_config = {
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
     # model-specific hyperparams
-    'anneal_till': 6000,  # for vae
-    'x0': 8000,  # for vae
+    'anneal_till': 3500,  # for vae
+    'x0': 6000,  # for vae
     'k': 5e-3,  # slope of the annealing function (for vae)
-    'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
-    'sampling_temperature': 1.0,  # for vae
+    'anneal_type': 'logistic',  # for vae {tanh, logistic, linear}
+    'sampling_temperature': 5e-3,  # for vae
 
     'clip': 50.0,  # values above which to clip the gradients
     'tf_ratio': 1.0,  # teacher forcing ratio
@@ -42,11 +42,9 @@ model_config = {
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
     'use_embeddings?': True,  # use word embeddings or not
-    'first_run?': True,  # True for the very first run
+    'first_run?': False,  # True for the very first run
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
     'n_layers': 2,
-    'use_attn?': False,
-    'first_run?': True,
     'filter_lang': 'english',
     #'filter_genre': {'Pop', 'Rock', 'Alternative', 'Rock indé', 'Metal', 'Pop indé/Folk'},
     'filter_genre': {'Metal'},
@@ -57,6 +55,7 @@ model_config = {
     'use_embeddings?': True,
     'pretrained_model': False,
     'generate_spectrograms': False,
+    'pretrained_model': 'rec/vae-1L-bilstm-40',
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
     'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae
