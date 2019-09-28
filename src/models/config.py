@@ -56,6 +56,7 @@ model_config = {
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
     'pretrained_model': False,
+    'generate_spectrograms': False,
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
     'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae
