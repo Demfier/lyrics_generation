@@ -1,14 +1,50 @@
 import torch
 model_config = {
-    'clip': 50,
-    'lr': 1e-4,
-    'n_layers': 2,
-    'unit': 'lstm',
+    # hyperparameters
+    'lr': 1e-3,
     'dropout': 0.3,
-    'n_epochs': 500,
-    'MAX_LENGTH': 30,
+    'patience': 3,  # number of epochs to wait before decreasing lr
+    'min_lr': 1e-7,  # minimum allowable value of lr
+    'task': 'rec',  # mt/dialog/rec/dialog-rec
+    # model-specific hyperparams
+    'anneal_till': 6000,  # for vae
+    'x0': 8000,  # for vae
+    'k': 5e-3,  # slope of the annealing function (for vae)
+    'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
+    'sampling_temperature': 1.0,  # for vae
+
+    'clip': 50.0,  # values above which to clip the gradients
+    'tf_ratio': 1.0,  # teacher forcing ratio
+
+    'unit': 'lstm',
+    'n_epochs': 100,
+    'batch_size': 100,
+    'enc_n_layers': 1,
+    'dec_n_layers': 1,
+    'disc_n_layers': 2,
+    'bidirectional': True,  # make the encoder bidirectional or not
+    'attn_model': None,  # None/dot/concat/general
+
+    'latent_dim': 256,
     'hidden_dim': 256,
-    'batch_size': 64,
+    'embedding_dim': 300,
+
+    # vocab-related params
+    'PAD_TOKEN': 0,
+    'SOS_TOKEN': 1,
+    'EOS_TOKEN': 2,
+    'UNK_TOKEN': 3,
+    'MAX_LENGTH': 30,  # Max length of a sentence
+
+    # run-time conf
+    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
+    'lang_pair': 'en-en',  # src-target language pair
+    'use_scheduler': True,  # half lr every 3 non-improving batches
+    'use_embeddings?': True,  # use word embeddings or not
+    'first_run?': True,  # True for the very first run
+    'min_freq': 2,  # min frequency for the word to be a part of the vocab
+    'n_layers': 2,
     'use_attn?': False,
     'first_run?': True,
     'filter_lang': 'english',
@@ -20,12 +56,12 @@ model_config = {
     'pretrained_model': False,
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
-    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer
+    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae
     'vocab_path': 'data/processed/vocab.npy',
-    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
     'dali_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
     'dali_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
+    'dali_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/lyrics.txt',  # Path to load dali lyrics
     # 'dali_path': '/home/gsahu/code/lyrics_generation/data/raw/DALI_v1.0/',
     # 'dali_audio': '/home/gsahu/code/lyrics_generation/data/raw/dali_audio/',  # Path to store dali audio files
 }

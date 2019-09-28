@@ -1,4 +1,5 @@
-from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, precision_score, recall_score
+import nltk
+from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, precision_score, recall_score, precision_recall_fscore_support
 import matplotlib.pyplot as plt
 
 
@@ -49,3 +50,13 @@ def plot_confusion_matrix(targets, predictions, classes,
         os.mkdir('reports/figures/{}'.format(model_code))
     plt.savefig('reports/figures/{}/cm_{}'.format(model_code, epoch))
     plt.close()
+
+
+def calculate_bleu_scores(hypothesis, references):
+    bleu_scores = {}
+    for i in range(1, 5):
+        w = 1.0 / i
+        weights = [w] * i
+        bleu_scores['bleu{}'.format(str(i))] = 100 * nltk.translate.bleu_score\
+            .corpus_bleu(references, hypothesis, weights=weights)
+    return bleu_scores
