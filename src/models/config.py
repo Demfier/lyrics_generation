@@ -37,7 +37,7 @@ model_config = {
     'MAX_LENGTH': 30,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cpu' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
@@ -46,17 +46,26 @@ model_config = {
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
     'n_layers': 2,
     'filter_lang': 'english',
-    'filter_genre': {'Pop'},
+    #'filter_genre': {'Pop', 'Rock', 'Alternative', 'Rock indé', 'Metal', 'Pop indé/Folk'},
+    'filter_genre': {'Metal'},
     'embedding_dim': 300,
+    'max_song_per_genre': 300,
     'bidirectional': True,
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
+    'pretrained_model': False,
+    'generate_spectrograms': False,
     'pretrained_model': 'rec/vae-1L-bilstm-40',
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
     'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae
     'vocab_path': 'data/processed/vocab.npy',
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
+    #'file_name': '/home/d35kumar/Github/lyrics_generation/data/raw/split_info.txt',
+    #'dali_path': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0',
+    #'dali_audio': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0/ogg_audio/',  # Path to store dali audio files
+    #'dali_audio_split': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0/ogg_audio_split/', # Path to store dali audio files split by lines
+    #'spectrograms': '/home/d35kumar/Github/lyrics_generation/data/processed/spectrograms_split/'
     'dali_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
     'dali_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
     'dali_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/lyrics.txt',  # Path to load dali lyrics
