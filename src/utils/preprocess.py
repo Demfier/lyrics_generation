@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import DALI as dali_code
 from itertools import zip_longest
+from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import train_test_split
 
 import matplotlib.pyplot as plt
@@ -29,6 +30,8 @@ def process_raw(config):
         dataset = process_bilstm(config)
     elif config['model_code'] == 'bimodal_scorer':
         dataset = process_bimodal(config)
+    elif config['model_code'] in {'dae', 'vae'}:
+        dataset = process_ae(config)
 
     with open('data/processed/{}/combined_dataset.pkl'.format(
             config['model_code']), 'wb') as f:
@@ -120,6 +123,18 @@ def process_bilstm(config):
     return dataset
 
 
+def process_ae(config):
+    dataset = []
+    print('Loading lyrics dataset')
+    with open(config['dali_lyrics'], 'r') as f:
+        lyrics_info = f.readlines()
+    for l in lyrics_info:
+        line, spec_path = l.split('\t')
+        sample = {'line': line.strip(), 'spec_path': spec_path.strip()}
+        dataset.append(sample)
+    return dataset
+
+
 def freq2note(freq):
     return np.round(12 * np.log2(freq/440.) + 69).astype(int)
 
@@ -178,7 +193,7 @@ def build_vocab(config):
     all_pairs = filter_pairs(all_pairs, config)
     vocab = Vocabulary()
     for pair_or_s in all_pairs:
-        if config['model_code'] == 'bimodal_scorer':
+        if config['model_code'] in {'dae', 'vae', 'bimodal_scorer'}:
             # pair_or_s -> a sentence
             vocab.add_sentence(pair_or_s)
             continue
@@ -207,6 +222,8 @@ def read_pairs(config, mode='all'):
         return read4bilstm(dataset)
     elif config['model_code'] == 'bimodal_scorer':
         return read4bimodal(dataset)
+    elif config['model_code'] in {'dae', 'vae'}:
+        return read4ae(dataset)
 
 
 def read4bimodal(dataset):
@@ -260,6 +277,14 @@ def read4bilstm(dataset):
         pairs.append(p)
         y.append(label)
     return pairs, torch.tensor(y).long()
+
+
+def read4ae(dataset):
+    pairs = []
+    for o in dataset:
+        line = normalize_string(o['line'])
+        pairs.append([line, line])
+    return pairs, []
 
 
 def normalize_string(x):
@@ -325,6 +350,21 @@ def generate_word_embeddings(vocab, config):
     with h5py.File(config['filtered_emb_path'], 'w') as f:
         f.create_dataset('data', data=combined_embeddings, dtype='f')
     return torch.from_numpy(combined_embeddings).float()
+
+
+def prepare_data(config):
+    data_dir = config['data_dir']
+    task = config['model_code']
+    max_len = config['MAX_LENGTH']
+
+    train_pairs = filter_pairs(read_pairs(config, 'train')[0], config)
+    val_pairs = filter_pairs(read_pairs(config, 'val')[0], config)
+    test_pairs = filter_pairs(read_pairs(config, 'test')[0], config)
+
+    random.shuffle(train_pairs)
+    random.shuffle(val_pairs)
+    random.shuffle(test_pairs)
+    return train_pairs, val_pairs, test_pairs
 
 
 def load_word_embeddings(config):
@@ -394,23 +434,46 @@ def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
         }
 
 
+def batch_to_model_compatible_data_ae(vocab, pairs, device):
+    """
+    Returns padded source and target index sequences
+    ==================
+    Parameters:
+    ==================
+    vocab (Vocabulary object): Vocabulary built from the dataset
+    pairs (list of tuples): The source and target sentence pairs
+    device (Str): Device to place the tensors in
+    """
+    sos_token = vocab.word2index['<SOS>']
+    pad_token = vocab.word2index['<PAD>']
+    eos_token = vocab.word2index['<EOS>']
+    src_indexes, src_lens, target_indexes = [], [], []
+    for pair in pairs:
+        src_indexes.append(
+            torch.tensor(
+                [sos_token] + vocab.sentence2index(pair[0]) + [eos_token]
+                ))
+        # extra 2 for sos_token and eos_token
+        src_lens.append(len(pair[0].split()) + 2)
+
+        target_indexes.append(
+            torch.tensor(
+                [sos_token] + vocab.sentence2index(pair[1]) + [eos_token]
+                ))
+
+    # pad src and target batches
+    src_indexes = pad_sequence(src_indexes, padding_value=pad_token)
+    target_indexes = pad_sequence(target_indexes, padding_value=pad_token)
+
+    src_lens = torch.tensor(src_lens)
+    return src_indexes.to(device), src_lens.to(device), target_indexes.to(device)
+
+
 def _btmcd(vocab, pairs, config):
     """alias for batch_to_model_compatible_data"""
     if config['model_code'] == 'bilstm_scorer':
         return batch_to_model_compatible_data_bilstm(vocab, pairs, config['device'])
     elif config['model_code'] == 'bimodal_scorer':
         return batch_to_model_compatible_data_bimodal(vocab, pairs, config['device'])
-
-
-def pad_indexes(indexes_batch, value):
-    """
-    Returns a padded tensor of shape (max_seq_len, batch_size) where
-    max_seq_len is the sequence with max length in indexes_batch and
-    batch_size is the number of elements in indexes_batch
-    ==================
-    Parameters:
-    ==================
-    indexes_batch (list of list): the batch of indexes to pad
-    value (int): the value with which to pad the indexes batch
-    """
-    return torch.tensor(list(zip_longest(*indexes_batch, fillvalue=value)))
+    elif config['model_code'] in {'dae', 'vae'}:
+        return batch_to_model_compatible_data_ae(vocab, pairs, config['device'])
