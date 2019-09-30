@@ -33,7 +33,7 @@ def plot_confusion_matrix(targets, predictions, classes,
     plt.yticks(tick_marks, classes)
 
     if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        cm = 100*np.round(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=3)
         print("Normalized confusion matrix")
     else:
         print('Confusion matrix, without normalization')
@@ -42,9 +42,12 @@ def plot_confusion_matrix(targets, predictions, classes,
 
     thresh = cm.max() / 2.
     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, cm[i, j],
+        v = cm[i, j]
+        if normalize:
+            v = np.round(v, decimals=1)
+        plt.text(j, i, v,
                  horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
+                 color="white" if v > thresh else "black")
 
     plt.tight_layout()
     plt.ylabel('True label')

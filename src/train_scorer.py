@@ -159,7 +159,7 @@ def main():
                 epoch_loss.append(loss.item())
 
             metrics.plot_confusion_matrix(
-                actual, generated,
+                actual, generated, normalize=True,
                 classes=list(range(len(conf['filter_genre']))),
                 epoch=e, model_code=conf['model_code'])
             performance = metrics.evaluate(actual, generated)
@@ -189,7 +189,7 @@ def main():
                     generated = np.concatenate((generated, preds.cpu().numpy()))
 
                 metrics.plot_confusion_matrix(
-                    actual, generated,
+                    actual, generated, normalize=True,
                     classes=list(range(len(conf['filter_genre']))),
                     epoch=e, model_code=conf['model_code'])
                 performance = metrics.evaluate(actual, generated)
