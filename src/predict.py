@@ -52,8 +52,8 @@ def main():
             map_location=device)['model'])
 
     with torch.no_grad():
-        print('### Random Sampling ###:\n')
-        random_sampled = translate(vocab, model._random_sample(10))
+        print('\n### Random Sampling ###:\n')
+        random_sampled = translate(vocab, model._random_sample(1000))
         for s in random_sampled:
             print(s)
 

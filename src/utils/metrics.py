@@ -1,6 +1,9 @@
 import nltk
-from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, precision_score, recall_score, precision_recall_fscore_support
+import os
+import itertools
+import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, precision_score, recall_score
 
 
 def evaluate(targets, predictions):

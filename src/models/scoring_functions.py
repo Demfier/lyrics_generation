@@ -113,7 +113,6 @@ class RNNScorer(nn.Module):
         music = self.attn(music_output.permute(1, 0, 2), music_pool)
         lyrics = self.attn(lyrics_output.permute(1, 0, 2), lyrics_pool)
         fused = self.fusion(music, lyrics)
-
         return self.out(fused)
 
 
@@ -173,13 +172,8 @@ class BiModalScorer(nn.Module):
             nn.Linear(self.final_in_features // 2, self.output_dim))
 
     def pool(self, rnn_output):
-
-        if self.avg_pool:
-            rnn_output = F.avg_pool1d(rnn_output, rnn_output.size(2))
-        else:
-            rnn_output = F.max_pool1d(rnn_output, rnn_output.size(2))
-
-        return rnn_output.squeeze(2)
+        pool_func = F.avg_pool1d if self.avg_pool else F.max_pool1d
+        return pool_func(rnn_output, rnn_output.size(2)).squeeze(2)
 
     def fusion(self, music, lyrics):
         return torch.cat((music, lyrics), dim=-1)
@@ -189,7 +183,6 @@ class BiModalScorer(nn.Module):
             rnn_output, (hidden, _) = self.rnn(embedded)
         else:  # gru/rnn
             rnn_output, hidden = self.rnn(embedded)
-
         return rnn_output, hidden
 
     def forward(self, x):
@@ -207,3 +200,51 @@ class BiModalScorer(nn.Module):
         lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
         lyrics_pool = self.pool(lyrics_output.permute(1, 2, 0))
         return self.out(self.fusion(music_features, lyrics_pool))
+
+
+class GenreClassifier(BiModalScorer):
+    """docstring for GenreClassifier"""
+    def __init__(self, config, embedding_wts):
+        super(GenreClassifier, self).__init__(config, embedding_wts)
+        self.output_dim = len(self.config['filter_genre'])
+        self.out = nn.Linear(self.config['hidden_dim'], self.output_dim)
+
+        del self.img_encoder
+        del self.w
+
+    def attn(self, rnn_output, final_hidden):
+        """
+        Returns `attended` hidden state given an rnn_output and its final
+        hidden state
+
+        attn: torch.Tensor, torch.Tensor -> torch.Tensor
+        requires:
+            rnn_output.shape => batch_size x max_seq_len x hidden_dim
+            final_hidden.shape => batch_size x hidden_dim
+        """
+        attn_wts = torch.bmm(rnn_output, final_hidden.unsqueeze(2)).squeeze(2)
+        soft_attn_wts = F.softmax(attn_wts, dim=1)  # bs x num_t
+        # In the next step, rnn_output.shape changes as follows:
+        # (bs x num_t x hidden_dim) => (bs x hidden_dim x num_t)
+        # Finally, we get new_hidden of shape: (bs x hidden_dim)
+        new_hidden = torch.bmm(rnn_output.transpose(1, 2),
+                               soft_attn_wts.unsqueeze(2)).squeeze(2)
+        return new_hidden
+
+    def forward(self, x):
+        _, bs = x['lyrics_seq'].shape
+        lyrics_embeddings = self.embedding(x['lyrics_seq'])
+        lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
+        # Do this to sum the bidirectional outputs
+        lyrics_output = (lyrics_output[:, :, :self.config['hidden_dim']] +
+                         lyrics_output[:, :, self.config['hidden_dim']:])
+        lyrics_output = lyrics_output.permute(1, 0, 2).contiguous()
+
+        lyrics_hidden = lyrics_hidden.view(self.config['n_layers'], 2,
+                                           bs, self.config['hidden_dim'])[-1]
+        # sum (pool) forward and backward hidden states
+        lyrics_hidden = (lyrics_hidden[0, :, :self.config['hidden_dim']] +
+                         lyrics_hidden[1, :, :self.config['hidden_dim']])
+
+        attended_ouptut = self.attn(lyrics_output, lyrics_hidden)
+        return self.out(attended_ouptut)

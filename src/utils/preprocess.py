@@ -2,19 +2,15 @@ import os
 import re
 import sys
 import h5py
-import math
-import json
 import torch
 import gensim
 import pickle
 import random
 import skimage
-import itertools
 import unicodedata
 import numpy as np
 import pandas as pd
 import DALI as dali_code
-from itertools import zip_longest
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import train_test_split
 
@@ -32,6 +28,8 @@ def process_raw(config):
         dataset = process_bimodal(config)
     elif config['model_code'] in {'dae', 'vae'}:
         dataset = process_ae(config)
+    elif config['model_code'] == 'clf':
+        dataset = process_clf(config)
 
     with open('data/processed/{}/combined_dataset.pkl'.format(
             config['model_code']), 'wb') as f:
@@ -137,6 +135,35 @@ def process_ae(config):
     return list(set(dataset))
 
 
+def process_clf(config):
+    dataset = []
+    print('Loading DALI')
+    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
+                                               skip=[], keep=[])
+    print('Loading lyrics dataset')
+    with open(config['dali_lyrics'], 'r') as f:
+        lyrics_info = f.readlines()
+    genre_list = sorted(list(config['filter_genre']))
+    for l in lyrics_info:
+        line, spec_path = l.split('\t')
+        # spec_path of the form:
+        # {path_to_split_spectrograms}/8d2bea941a11497a984e50de3119b4d4_0.ogg
+        # below command splits by '/', keep the last element, then splits by
+        # '_' and keep the first element (to remove the line id and ext)
+        spec_id = spec_path.split('/')[-1].split('_')[0]
+        info = dali_data[spec_id].info
+        genre = info['metadata']['genres'][0]  # consider 1st as the major one
+        # Note: this line whould throw an error if genre is not present in
+        # genre_list but this shouldn't happen since the lyrics were filtered
+        # using the same config. In other words, it's like a sanity check.
+        genre_id = genre_list.index(genre)
+        sample = {'lyrics': normalize_string(line),
+                  'genre_id': genre_id,
+                  'genre': genre}
+        dataset.append(sample)
+    return dataset
+
+
 def get_subsequences(line):
     line = line.split()
     return [' '.join(line[:i]) for i in range(1, len(line))]
@@ -204,7 +231,7 @@ def build_vocab(config):
     all_pairs = filter_pairs(all_pairs, config)
     vocab = Vocabulary()
     for pair_or_s in all_pairs:
-        if config['model_code'] == 'bimodal_scorer':
+        if config['model_code'] in {'bimodal_scorer', 'clf'}:
             # pair_or_s -> a sentence
             vocab.add_sentence(pair_or_s)
             continue
@@ -235,6 +262,23 @@ def read_pairs(config, mode='all'):
         return read4bimodal(dataset)
     elif config['model_code'] in {'dae', 'vae'}:
         return read4ae(dataset)
+    elif config['model_code'] == 'clf':
+        return read4genre(dataset)
+
+
+def read4genre(dataset):
+    lines = []
+    y = []
+    for o in dataset:
+        lines.append(normalize_string(o['lyrics']))
+        y.append(o['genre_id'])
+    x_y = list(zip(lines, y))
+    np.random.shuffle(x_y)
+    lines, y = [], []
+    for p, label in x_y:
+        lines.append(p)
+        y.append(label)
+    return lines, torch.tensor(y).long()
 
 
 def read4bimodal(dataset):
@@ -331,6 +375,9 @@ def filter_pairs(pairs, config):
         # No need to return those big matrices
         return [' '.join(pair[0].split()[:max_len])
                 for pair in pairs if pair[0]]
+    elif config['model_code'] == 'clf':
+        return [' '.join(l.split()[:max_len])
+                for l in pairs if l]
     return [(' '.join(pair[0].split()[:max_len]),
              ' '.join(pair[1].split()[:max_len]))
             for pair in pairs if pair[0] and pair[1]]
@@ -372,9 +419,9 @@ def prepare_data(config):
     val_pairs = filter_pairs(read_pairs(config, 'val')[0], config)
     test_pairs = filter_pairs(read_pairs(config, 'test')[0], config)
 
-    random.shuffle(train_pairs)
-    random.shuffle(val_pairs)
-    random.shuffle(test_pairs)
+    np.random.shuffle(train_pairs)
+    np.random.shuffle(val_pairs)
+    np.random.shuffle(test_pairs)
     return train_pairs, val_pairs, test_pairs
 
 
@@ -455,6 +502,36 @@ def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
         }
 
 
+def batch_to_model_compatible_data_clf(vocab, lines, device):
+    """
+    Returns padded source and target index sequences
+    ==================
+    Parameters:
+    ==================
+    vocab (Vocabulary object): Vocabulary built from the dataset
+    pairs (list of tuples): The source line and note sequences
+    """
+    sos_token = vocab.word2index['<SOS>']
+    pad_token = vocab.word2index['<PAD>']
+    eos_token = vocab.word2index['<EOS>']
+    src_indexes, src_lens = [], []
+    for l in lines:
+        src_indexes.append(
+            torch.tensor(
+                [sos_token] + vocab.sentence2index(l) + [eos_token]
+                ))
+        # extra 2 for sos_token and eos_token
+        src_lens.append(len(l.split()) + 2)
+
+    # pad the batches
+    src_indexes = pad_sequence(src_indexes, padding_value=pad_token)
+    src_lens = torch.tensor(src_lens)
+    return {
+        'lyrics_seq': src_indexes.to(device),
+        'lyrics_lens': src_lens.to(device)
+        }
+
+
 def batch_to_model_compatible_data_ae(vocab, pairs, device):
     """
     Returns padded source and target index sequences
@@ -498,3 +575,5 @@ def _btmcd(vocab, pairs, config):
         return batch_to_model_compatible_data_bimodal(vocab, pairs, config['device'])
     elif config['model_code'] in {'dae', 'vae'}:
         return batch_to_model_compatible_data_ae(vocab, pairs, config['device'])
+    elif config['model_code'] == 'clf':
+        return batch_to_model_compatible_data_clf(vocab, pairs, config['device'])

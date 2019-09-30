@@ -5,7 +5,6 @@ model_config = {
     'dropout': 0.3,
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
-    'task': 'rec',  # mt/dialog/rec/dialog-rec
     # model-specific hyperparams
     'anneal_till': 3500,  # for vae
     'x0': 6000,  # for vae
@@ -27,7 +26,7 @@ model_config = {
     'attn_model': None,  # None/dot/concat/general
 
     'latent_dim': 256,
-    'hidden_dim': 256,
+    'hidden_dim': 512,
     'embedding_dim': 300,
 
     # vocab-related params
@@ -45,22 +44,22 @@ model_config = {
     'use_embeddings?': True,  # use word embeddings or not
     'first_run?': False,  # True for the very first run
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
-    'n_layers': 2,
+    'n_layers': 1,
     'filter_lang': 'english',
-    # 'filter_genre': {'Pop', 'Rock', 'Alternative', 'Rock indé', 'Metal', 'Pop indé/Folk'},
-    'filter_genre': {'Metal'},
+    'filter_genre': {'Pop', 'Rock', 'Alternative', 'Dance',
+                     'Metal', 'Country', 'Electro', 'R&B'},
+    # 'filter_genre': {'Metal'},
     'embedding_dim': 300,
     'max_song_per_genre': 300,
     'bidirectional': True,
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
-    'pretrained_model': False,
     'generate_spectrograms': False,
-    'pretrained_model': 'rec/vae-1L-bilstm-40',
+    'pretrained_model': False,  # {'rec/vae-1L-bilstm-40', False},
     'scorer_path': 'models/',
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
-    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae
+    'model_code': 'clf',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
     'vocab_path': 'data/processed/vocab.npy',
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
     # 'file_name': '/home/d35kumar/Github/lyrics_generation/data/raw/split_info.txt',

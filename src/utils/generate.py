@@ -9,6 +9,7 @@ import gensim
 import pickle
 import random
 import skimage
+import librosa
 import itertools
 import unicodedata
 import numpy as np
@@ -16,9 +17,10 @@ import pandas as pd
 import DALI as dali_code
 from itertools import zip_longest
 from pydub import AudioSegment
-import librosa
 from librosa.display import specshow
 import matplotlib.pyplot as plt
+
+
 def run(config):
     print('Loading DALI')
     dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
@@ -41,7 +43,7 @@ def run(config):
         if 'genres' in info['metadata'] and len(info['metadata']['genres']) > 0 and info['metadata']['language'] == config['filter_lang'] and (info['metadata']['genres'][0] == 'Pop'):
             b += 1
             print(b)
-            a = dali_data[f_id].annotations['annot']['lines']    
+            a = dali_data[f_id].annotations['annot']['lines']
             print(p)
             #print(a)
             if config['generate_spectrograms']:
