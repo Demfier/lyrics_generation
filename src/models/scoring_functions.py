@@ -192,17 +192,16 @@ class BiModalScorer(nn.Module):
 
         return rnn_output, hidden
 
-    def forward(self, x_train):
-
-        # batch_size, num_channels, width, height (bs, 3, 224, 224) when
-        # use_melfeats? in False else (batch_size, 1000)
-        music_melspec = x_train['mel_spec']
+    def forward(self, x):
+        # music_melspec -> batch_size, num_channels, width, height (bs, 3, 224, 224) when
+        # use_melfeats? is False else (batch_size, 1000)
+        music_melspec = x['mel_spec']
         # batch_size, max_sequence_length, embedding_dim
-        lyrics_embeddings = self.embedding(x_train['lyrics_seq'])
+        lyrics_embeddings = self.embedding(x['lyrics_seq'])
         if self.config['use_melfeats?']:
             raise NotImplementedError('Using direct image features not supported yet.')
         else:
-            # batch_size, 1000
+            # (batch_size, 1000)
             music_features = self.img_encoder(music_melspec)
 
         lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
