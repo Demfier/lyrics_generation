@@ -37,21 +37,21 @@ class AutoEncoder(nn.Module):
                                    self.config['enc_n_layers'],
                                    bidirectional=self.bidirectional)
 
-            self.decoder = nn.LSTM(self.embedding_dim, self.hidden_dim,
+            self.decoder = nn.LSTM(self.embedding_dim, self.latent_dim,
                                    self.config['dec_n_layers'])
         elif self.unit == 'gru':
             self.encoder = nn.GRU(self.embedding_dim, self.hidden_dim,
                                   self.config['enc_n_layers'],
                                   bidirectional=self.bidirectional)
 
-            self.decoder = nn.GRU(self.embedding_dim, self.hidden_dim,
+            self.decoder = nn.GRU(self.embedding_dim, self.latent_dim,
                                   self.config['dec_n_layers'])
         else:
             self.encoder = nn.RNN(self.embedding_dim, self.hidden_dim,
                                   self.config['enc_n_layers'],
                                   bidirectional=self.bidirectional)
 
-            self.decoder = nn.RNN(self.embedding_dim, self.hidden_dim,
+            self.decoder = nn.RNN(self.embedding_dim, self.latent_dim,
                                   self.config['dec_n_layers'])
 
         if self.config['attn_model']:
@@ -61,7 +61,7 @@ class AutoEncoder(nn.Module):
         # All the projection layers
         self.pf = (2 if self.bidirectional else 1)  # project factor
 
-        self.output2vocab = nn.Linear(self.hidden_dim + self.embedding_dim,
+        self.output2vocab = nn.Linear(self.latent_dim + self.embedding_dim,
                                       self.vocab.size)
 
         self.optimizer = optim.Adam(self.parameters(), self.config['lr'])

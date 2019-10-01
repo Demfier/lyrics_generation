@@ -5,12 +5,13 @@ model_config = {
     'dropout': 0.3,
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
+    'task': 'rec',  # mt/dialog/rec/dialog-rec
     # model-specific hyperparams
     'anneal_till': 3500,  # for vae
     'x0': 6000,  # for vae
     'k': 5e-3,  # slope of the annealing function (for vae)
-    'anneal_type': 'logistic',  # for vae {tanh, logistic, linear}
-    'sampling_temperature': 5e-3,  # for vae
+    'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
+    'sampling_temperature': 5e-3,  # z_temp to be used during inference
 
     'clip': 50.0,  # values above which to clip the gradients
     'tf_ratio': 1.0,  # teacher forcing ratio
@@ -42,7 +43,7 @@ model_config = {
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
     'use_embeddings?': True,  # use word embeddings or not
-    'first_run?': False,  # True for the very first run
+    'first_run?': True,  # True for the very first run
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
     'n_layers': 1,
     'filter_lang': 'english',
@@ -59,7 +60,7 @@ model_config = {
     'scorer_path': 'models/',
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
-    'model_code': 'clf',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
+    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
     'vocab_path': 'data/processed/vocab.npy',
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
     # 'file_name': '/home/d35kumar/Github/lyrics_generation/data/raw/split_info.txt',

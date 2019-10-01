@@ -67,12 +67,10 @@ def main():
         print('\n### Linear Interpolation ###:\n')
         print(s1)
         interpolated = translate(vocab, model._interpolate(get_z(x1, x1_lens, model),
-                                                           get_z(x2, x2_lens, model),
-                                                           50))
+                                                           get_z(x2, x2_lens, model), 50))
         for s in interpolated:
             print(s)
         print(s2)
-
 
 
 if __name__ == '__main__':

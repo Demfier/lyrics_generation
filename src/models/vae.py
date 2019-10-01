@@ -17,7 +17,7 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         self.anneal_till = self.config['anneal_till']
         self.k = self.config['k']
         self.x0 = self.config['x0']
-        self.z_temp = self.config['sampling_temperature']
+        self.z_temp = 1
         self.z_mu = nn.Linear(self.hidden_dim, self.latent_dim)
         self.z_log_sigma = nn.Linear(self.hidden_dim, self.latent_dim)
 
@@ -111,6 +111,7 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         _, bs = x.shape
         if infer:  # model in val/test mode
             self.eval()
+            self.z_temp = self.config['sampling_temperature']
             y = torch.zeros(
                 (self.config['MAX_LENGTH'], x.shape[1])).long().fill_(
                  self.sos_idx).to(self.device)
