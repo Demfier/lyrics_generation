@@ -17,7 +17,6 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         self.anneal_till = self.config['anneal_till']
         self.k = self.config['k']
         self.x0 = self.config['x0']
-        self.z_temp = 1
         self.z_mu = nn.Linear(self.hidden_dim, self.latent_dim)
         self.z_log_sigma = nn.Linear(self.hidden_dim, self.latent_dim)
 
@@ -82,11 +81,13 @@ class VariationalAutoEncoder(dae.AutoEncoder):
             return min(1, step/self.x0)
 
     def _random_sample(self, n):
+        self.z_temp = self.config['sampling_temperature']
         z = torch.randn(n, self.latent_dim).unsqueeze(0)
         y = (torch.ones(self.config['MAX_LENGTH'], n) * self.sos_idx).long()
         return self._decode(z.to(self.device), y.to(self.device), infer=True)
 
     def _interpolate(self, z1, z2, steps):
+        self.z_temp = self.config['sampling_temperature']
         y = (torch.ones(self.config['MAX_LENGTH'], steps + 2) * self.sos_idx).long()
         z = torch.tensor(np.linspace(z1, z2, steps)).squeeze().unsqueeze(0)
         z = torch.cat((z1, z), dim=1)
@@ -117,6 +118,7 @@ class VariationalAutoEncoder(dae.AutoEncoder):
                  self.sos_idx).to(self.device)
         else:  # train mode
             self.train()
+            self.z_temp = 1.0
             self.optimizer.zero_grad()
 
         encoder_dict = self._encode(x, x_lens)
