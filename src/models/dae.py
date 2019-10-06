@@ -86,19 +86,20 @@ class AutoEncoder(nn.Module):
                        map_location=self.config['device'])['model'])
         return scorer
 
-    def _scoring_function(self, history, mel_specs):
+    def _scoring_function(self, candidates, mel_specs):
         """
-        returns tokens for top k beams given a history out of all the possible
+        returns tokens for top k beams given a candidates out of all the possible
         tokens in the vocab. It passes all the k*vocab_size possible sentences
         through the pretrained scoring function and retuns the ones with
         the least hinge loss
-        history: (t, bs, vocab_size) where t is the current time step
+        candidates: (t, bs, vocab_size) where t is the current time step
         """
         scorer = self._load_scorer_checkpoint('bimodal')
+        # Add vocab tokens to the candidates
         # compatibility scores
-        scores, _ = scorer({'lyrics_seq': history, 'mel_specs': mel_specs})
+        scores = scorer({'lyrics_seq': candidates, 'mel_spec': mel_specs})
         # topk_tokens -> (beam_size*bs)
-        _, topk_tokens = scores.topk(self.beam_size)
+        _, token_ids = scores.topk(self.beam_size)
         return topk_tokens
 
     def _encode(self, x, x_lens):
@@ -187,8 +188,9 @@ class AutoEncoder(nn.Module):
                 if self.config['dec_mode'] == 'beam':
                     # scoring function returns tokens for the topk beams
                     # based on hinge loss
+                    candidates = torch.cat((decoder_outputs[:t+1], ouptut.unsqueeze(0)))
                     # output -> (beam_size*bs)
-                    output = self._scoring_function(decoder_outputs[:t+1], y_specs)
+                    output = self._scoring_function(candidates, y_specs)
                 else:
                     # output.max(1) -> (scores, tokens)
                     # doing a max along `dim=1` returns logit scores and

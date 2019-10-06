@@ -10,6 +10,7 @@ import skimage
 import unicodedata
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 import DALI as dali_code
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import train_test_split
@@ -39,33 +40,23 @@ def process_raw(config):
 
 
 def process_bimodal(config):
-    print('Loading DALI')
-    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
-                                               skip=[], keep=[])
+    print('Loading split dataset')
+    with open(config['dali_lyrics']) as f:
+        line_specs = f.readlines()
+
     dataset = []
-    spec_path = '{}spectrograms/'.format(config['data_dir'])
-    file_ids = [p.split('.')[0] for p in os.listdir(spec_path)]
-
-    for f_id in file_ids:
-        sample = {}
-        info = dali_data[f_id].info
-
-        if (  # skip if the song doesn't belong to any genre
-            'genres' not in info['metadata']
-            ) or (  # skip if it's in a different language
-            config['filter_lang'] and
-            info['metadata']['language'] != config['filter_lang']
-            ) or (  # skip the entry if it's in a different genre
-                config['filter_genre'] and
-                'genres' in info['metadata'] and
-                config['filter_genre'].intersection(
-                    info['metadata']['genres']) != config['filter_genre']
-                ):
-            continue
+    for entry in tqdm(line_specs):
+        line, spec_path = entry.strip().split('\t')
+        f_id = spec_path.split('/')[-1].split('.')[0]
         # list of dictionaries
-        sample['lyrics'] = dali_data[f_id].annotations['annot']['lines']
-        sample['mel_spec'] = read_spectrogram('{}{}.png'.format(spec_path, f_id))
-        dataset.append(sample)
+        try:
+            for l in get_subsequences(line):
+                sample = {}
+                sample['lyrics'] = l.strip()
+                sample['mel_spec'] = read_spectrogram('{}{}.png'.format(config['split_spec'], f_id))
+                dataset.append(sample)
+        except FileNotFoundError as e:  # skip file as no spectrogram exists
+            continue
     return dataset
 
 
@@ -170,7 +161,7 @@ def get_subsequences(line):
 
 
 def uniq_dictlist(list_of_dict):
-    return list({v['id']: v for v in list_of_dict}.values())
+    return list({v['line']: v for v in list_of_dict}.values())
 
 
 def freq2note(freq):

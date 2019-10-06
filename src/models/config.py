@@ -60,7 +60,7 @@ model_config = {
     'scorer_path': 'models/',
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
-    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
+    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
     'vocab_path': 'data/processed/vocab.npy',
     'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
     # 'file_name': '/home/d35kumar/Github/lyrics_generation/data/raw/split_info.txt',
@@ -71,6 +71,7 @@ model_config = {
     'dali_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
     'dali_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
     'dali_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/lyrics.txt',  # Path to load dali lyrics
+    'split_spec': '/collection/gsahu/ae/lyrics_generation/data/processed/spectrograms_split/',  # Path to load dali lyrics
     # 'dali_path': '/home/gsahu/code/lyrics_generation/data/raw/DALI_v1.0/',
     # 'dali_audio': '/home/gsahu/code/lyrics_generation/data/raw/dali_audio/',  # Path to store dali audio files
 }
