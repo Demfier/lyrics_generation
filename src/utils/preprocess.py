@@ -46,17 +46,20 @@ def process_bimodal(config):
 
     dataset = []
     for entry in tqdm(line_specs):
-        line, spec_path = entry.strip().split('\t')
-        f_id = spec_path.split('/')[-1].split('.')[0]
-        # list of dictionaries
         try:
+            line, spec_path = entry.strip().split('\t')
+            f_id = spec_path.split('/')[-1].split('.')[0]
+            # list of dictionaries
+            mel_path = '{}{}.png'.format(config['split_spec'], f_id)
+            if not os.path.exists(mel_path):  # skip if spec doesn't exist
+                continue
             for l in get_subsequences(line):
                 sample = {}
                 sample['lyrics'] = l.strip()
-                sample['mel_spec'] = read_spectrogram('{}{}.png'.format(config['split_spec'], f_id))
+                sample['mel_path'] = mel_path
                 dataset.append(sample)
-        except FileNotFoundError as e:  # skip file as no spectrogram exists
-            continue
+        except ValueError as e:
+            print('skipping {}...due to value error'.format(entry))
     return dataset
 
 
@@ -273,20 +276,27 @@ def read4genre(dataset):
 
 
 def read4bimodal(dataset):
+    """
+    dataset is a list of dictionaries with two fields, lyrics and mel_path
+    """
     lyrics_list = []
-    mel_specs = []
+    mel_paths = []
     for v in dataset:
-        mel_spec = v['mel_spec']
-        for l in v['lyrics']:
-            line = normalize_string(l['text'])
-            lyrics_list.append(line)
-            mel_specs.append(mel_spec)
-    pairs = list(zip(lyrics_list, mel_specs))
+        lyrics_list.append(normalize_string(v['lyrics']))
+        mel_paths.append(v['mel_path'])
+
+    pairs = list(zip(lyrics_list, mel_paths))
     y = [1] * len(pairs) + [-1] * len(pairs)
+
     # neg sampling
-    np.random.shuffle(lyrics_list)
-    np.random.shuffle(mel_specs)
-    pairs += list(zip(lyrics_list, mel_specs))
+    total_samples = len(dataset)
+    deltas = np.random.choice(np.arange(30, total_samples/2), total_samples)
+    lyrics_list = lyrics_list * 2
+    mel_paths_tmp = mel_paths  # make a copy as .append mutates
+    for idx in range(total_samples):
+        neg_idx = get_neg_idx(idx, total_samples-1, deltas[idx])
+        mel_paths.append(mel_paths_tmp[neg_idx])
+    pairs += list(zip(lyrics_list, mel_paths))
 
     # Shuffle the entire dataset
     data = list(zip(pairs, y))
@@ -297,6 +307,30 @@ def read4bimodal(dataset):
         pairs.append(d[0])
         y.append(d[1])
     return pairs, torch.tensor(y).long()
+
+
+def get_neg_idx(idx, limit, delta=None):
+    """
+    given a lyrics id, add/subtract a delta (whose max value is limit/2)
+    from it to get the id of the negative sample mel_path. If the value
+    unflows 0, change neg_idx to 0+delta. If values overflows limit, change
+    neg_idx to limit - delta. After all this, if the difference between
+    neg_idx and original idx is less than 30, randomly add a number between
+    30 and 1000 to neg_idx
+    """
+    add = True if np.random.random() >= 0.5 else False
+    if delta is None:
+        delta = np.random.choice(np.arange(30, limit/2))
+    neg_idx = idx + delta if add else idx - delta
+
+    if neg_idx < 0:
+        neg_idx = delta
+    elif neg_idx > limit:
+        neg_idx = limit - delta
+
+    if np.abs(neg_idx - idx) < 30:
+        neg_idx = min(limit, idx + np.random.choice(1000))
+    return int(neg_idx)
 
 
 def read4bilstm(dataset):
@@ -472,14 +506,14 @@ def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
     eos_token = vocab.word2index['<EOS>']
     src_indexes, src_lens, mel_specs = [], [], []
     for pair in pairs:
-        sent, mel_spec = pair
+        sent, mel_path = pair
         src_indexes.append(
             torch.tensor(
                 [sos_token] + vocab.sentence2index(pair[0]) + [eos_token]
                 ))
         # extra 2 for sos_token and eos_token
         src_lens.append(len(pair[0].split()) + 2)
-        mel_specs.append(mel_spec)
+        mel_specs.append(read_spectrogram(mel_path))
 
     # pad the batches
     src_indexes = pad_sequence(src_indexes, padding_value=pad_token)
