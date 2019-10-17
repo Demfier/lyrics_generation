@@ -1,7 +1,7 @@
 import os
 import h5py
 import random
-import argparse
+import pickle
 import numpy as np
 from tqdm import tqdm
 from pprint import pprint
@@ -53,11 +53,11 @@ def save_snapshot(model, epoch_num):
     torch.save({
         'model': model.state_dict(),
         'epoch': epoch_num
-        }, '{}-{}-{}L-{}{}-{}'.format(conf['save_dir'],
-                                      conf['model_code'],
-                                      conf['n_layers'],
-                                      'bi' if conf['bidirectional'] else '',
-                                      conf['unit'], epoch_num))
+        }, '{}{}-{}L-{}{}-{}'.format(conf['save_dir'],
+                                     conf['model_code'],
+                                     conf['n_layers'],
+                                     'bi' if conf['bidirectional'] else '',
+                                     conf['unit'], epoch_num))
 
 
 def main():
@@ -80,11 +80,14 @@ def main():
     n_test = len(test_pairs)
     device = conf['device']
     embedding_wts = get_embedding_wts(vocab) if conf['use_embeddings?'] else None
-    print('Building model.')
+    print('Building model..')
     if conf['model_code'] == 'bilstm_scorer':
         model = RNNScorer(conf, embedding_wts)
     elif conf['model_code'] == 'bimodal_scorer':
         model = BiModalScorer(conf, embedding_wts)
+        print('Loading spec_array...')
+        with open('data/processed/bimodal_scorer/spec_array.pkl', 'rb') as f:
+            spec_array = pickle.load(f)
     elif conf['model_code'] == 'clf':  # classifier
         model = GenreClassifier(conf, embedding_wts)
         print('Genres: {}'.format(', '.join(sorted(list(conf['filter_genre'])))))
@@ -121,7 +124,10 @@ def main():
             iter_pairs = train_pairs[iter: iter + conf['batch_size']]
             if len(iter_pairs) == 0:  # handle the strange error
                 continue
-            x_train = preprocess._btmcd(vocab, iter_pairs, conf)
+            if conf['model_code'] == 'bimodal_scorer':
+                x_train = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
+            else:
+                x_train = preprocess._btmcd(vocab, iter_pairs, conf)
             # forward pass through the model
             predictions = model(x_train)
             # y_train -> (bs)
@@ -148,7 +154,10 @@ def main():
             actual = y_val.cpu().numpy()
             for iter in tqdm(range(0, n_val, conf['batch_size'])):
                 iter_pairs = val_pairs[iter: iter + conf['batch_size']]
-                x_val = preprocess._btmcd(vocab, iter_pairs, conf)
+                if conf['model_code'] == 'bimodal_scorer':
+                    x_val = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
+                else:
+                    x_val = preprocess._btmcd(vocab, iter_pairs, conf)
 
                 predictions = model(x_val)
                 scores, preds = torch.max(predictions, dim=1)
@@ -179,7 +188,10 @@ def main():
                 actual = y_test.cpu().numpy()
                 for iter in range(0, n_test, conf['batch_size']):
                     iter_pairs = test_pairs[iter: iter + conf['batch_size']]
-                    x_test = preprocess._btmcd(vocab, iter_pairs, conf)
+                    if conf['model_code'] == 'bimodal_scorer':
+                        x_test = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
+                    else:
+                        x_test = preprocess._btmcd(vocab, iter_pairs, conf)
 
                     predictions = model(x_test)
                     scores, preds = torch.max(predictions, dim=1)

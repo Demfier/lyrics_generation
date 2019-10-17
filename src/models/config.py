@@ -1,3 +1,4 @@
+import os
 import torch
 model_config = {
     # hyperparameters
@@ -7,9 +8,9 @@ model_config = {
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
     # model-specific hyperparams
-    'anneal_till': 3500,  # for vae
-    'x0': 6000,  # for vae
-    'k': 5e-3,  # slope of the annealing function (for vae)
+    'anneal_till': 1500,  # for vae
+    'x0': 5500,  # for vae
+    'k': 5e-3,  # slope of the logistic annealing function (for vae)
     'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
     'sampling_temperature': 5e-3,  # z_temp to be used during inference
 
@@ -22,12 +23,11 @@ model_config = {
     'enc_n_layers': 1,
     'dec_n_layers': 1,
     'dec_mode': 'greedy',  # type of decoding to use {greedy, beam}
-    'disc_n_layers': 2,
     'bidirectional': True,  # make the encoder bidirectional or not
     'attn_model': None,  # None/dot/concat/general
 
     'latent_dim': 256,
-    'hidden_dim': 512,
+    'hidden_dim': 256,
     'embedding_dim': 300,
 
     # vocab-related params
@@ -38,7 +38,7 @@ model_config = {
     'MAX_LENGTH': 30,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
@@ -51,7 +51,7 @@ model_config = {
                      'Metal', 'Country', 'Electro', 'R&B'},
     # 'filter_genre': {'Metal'},
     'embedding_dim': 300,
-    'max_song_per_genre': 300,
+    'max_songs': 200,  # maximum songs to consider per genre
     'bidirectional': True,
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
@@ -61,8 +61,6 @@ model_config = {
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
     'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
-    'vocab_path': 'data/processed/vocab.npy',
-    'filtered_emb_path': 'data/processed/english_w2v_filtered.hd5',
     # 'file_name': '/home/d35kumar/Github/lyrics_generation/data/raw/split_info.txt',
     # 'dali_path': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0',
     # 'dali_audio': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0/ogg_audio/',  # Path to store dali audio files
@@ -82,6 +80,12 @@ def get_dependent_params(model_config):
         model_config['beam_size'] = 3
     else:
         model_config['beam_size'] = 1
+    m_code = model_config['model_code']
+    processed_path = 'data/processed/{}/'.format(m_code)
+    if not os.path.exists(processed_path):
+        os.mkdir(processed_path)
+    model_config['vocab_path'] = '{}vocab.npy'.format(processed_path, m_code)
+    model_config['filtered_emb_path'] = '{}english_w2v_filtered.hd5'.format(processed_path, m_code)
 
 
 get_dependent_params(model_config)

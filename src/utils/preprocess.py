@@ -40,33 +40,69 @@ def process_raw(config):
 
 
 def process_bimodal(config):
-    print('Loading split dataset')
+    # This step takes a bit of time
+    print('Loading DALI')
+    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
+                                               skip=[], keep=[])
+    print('Loading split dataset (lyrics.txt)')
     with open(config['dali_lyrics']) as f:
         line_specs = f.readlines()
+        np.random.shuffle(line_specs)
 
+    # list of dictionaries
     dataset = []
+    spec_array = {}
+    genre_count = {}
     for entry in tqdm(line_specs):
         try:
             line, spec_path = entry.strip().split('\t')
             f_id = spec_path.split('/')[-1].split('.')[0]
-            # list of dictionaries
+
             mel_path = '{}{}.png'.format(config['split_spec'], f_id)
             if not os.path.exists(mel_path):  # skip if spec doesn't exist
                 continue
+
+            # extract genre of the song
+            # NOTE: Imp to do this at SONG level, not f_id
+            song_id = f_id.split('_')[0]
+            info = dali_data[song_id].info
+            genre = info['metadata']['genres'][0]
+            if genre not in genre_count:
+                genre_count[genre] = 0
+            genre_count[genre] += 1
+            # take only `max_songs` number of songs for a genre
+            if genre_count[genre] > config['max_songs']:
+                continue
+
             for l in get_subsequences(line):
                 sample = {}
+                sample['spec_id'] = f_id
                 sample['lyrics'] = l.strip()
                 sample['mel_path'] = mel_path
                 dataset.append(sample)
+
+                spec_array[f_id] = read_spectrogram(mel_path)
         except ValueError as e:
-            print('skipping {}...due to value error'.format(entry))
+            print('skipping {}...due to value error'.format(entry), end='')
+    print('subsequences per genre: {}'.format(genre_count))
+    print('Saving Mel Spec arrays...')
+    with open('data/processed/{}/spec_array.pkl'.format(
+            config['model_code']), 'wb') as f:
+        pickle.dump(spec_array, f)
     return dataset
 
 
-def read_spectrogram(spectrogram_path):
-    spec_arr = skimage.io.imread(spectrogram_path)
+def read_spectrogram_batch(spectrogram_paths):
     # remove alpha dimension and resize to 224x224
-    return skimage.transform.resize(spec_arr[:, :, :3], (224, 224, 3))
+    return [skimage.transform.resize(s[:, :, :3], (224, 224, 3))
+            for s in skimage.io.imread_collection(spectrogram_paths)]
+
+
+def read_spectrogram(spectrogram_path):
+    # remove alpha dimension and resize to 224x224
+    return skimage.transform.resize(
+        skimage.io.imread(spectrogram_path)[:, :, :3], (224, 224, 3)
+        )
 
 
 def process_bilstm(config):
@@ -138,8 +174,11 @@ def process_clf(config):
     with open(config['dali_lyrics'], 'r') as f:
         lyrics_info = f.readlines()
     genre_list = sorted(list(config['filter_genre']))
-    for l in lyrics_info:
+    genres = []
+    spec_paths = []
+    for l in lyrics_info[:10000]:
         line, spec_path = l.split('\t')
+        spec_paths.append(spec_path)
         # spec_path of the form:
         # {path_to_split_spectrograms}/8d2bea941a11497a984e50de3119b4d4_0.ogg
         # below command splits by '/', keep the last element, then splits by
@@ -147,6 +186,7 @@ def process_clf(config):
         spec_id = spec_path.split('/')[-1].split('_')[0]
         info = dali_data[spec_id].info
         genre = info['metadata']['genres'][0]  # consider 1st as the major one
+        genres.append(genre)
         # Note: this line whould throw an error if genre is not present in
         # genre_list but this shouldn't happen since the lyrics were filtered
         # using the same config. In other words, it's like a sanity check.
@@ -155,6 +195,11 @@ def process_clf(config):
                   'genre_id': genre_id,
                   'genre': genre}
         dataset.append(sample)
+    with open('genres.txt', 'w') as f:
+        f.write('\n'.join(genres))
+    with open('specs.txt', 'w') as f:
+        f.write('\n'.join(spec_paths))
+    return None
     return dataset
 
 
@@ -283,7 +328,7 @@ def read4bimodal(dataset):
     mel_paths = []
     for v in dataset:
         lyrics_list.append(normalize_string(v['lyrics']))
-        mel_paths.append(v['mel_path'])
+        mel_paths.append(v['spec_id'])
 
     pairs = list(zip(lyrics_list, mel_paths))
     y = [1] * len(pairs) + [-1] * len(pairs)
@@ -492,7 +537,7 @@ def batch_to_model_compatible_data_bilstm(vocab, pairs, device):
         }
 
 
-def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
+def batch_to_model_compatible_data_bimodal(vocab, pairs, device, spec_array):
     """
     Returns padded source and target index sequences
     ==================
@@ -506,20 +551,21 @@ def batch_to_model_compatible_data_bimodal(vocab, pairs, device):
     eos_token = vocab.word2index['<EOS>']
     src_indexes, src_lens, mel_specs = [], [], []
     for pair in pairs:
-        sent, mel_path = pair
+        sent, spec_id = pair
         src_indexes.append(
             torch.tensor(
                 [sos_token] + vocab.sentence2index(pair[0]) + [eos_token]
                 ))
         # extra 2 for sos_token and eos_token
         src_lens.append(len(pair[0].split()) + 2)
-        mel_specs.append(read_spectrogram(mel_path))
+        mel_specs.append(spec_array[spec_id])
 
     # pad the batches
     src_indexes = pad_sequence(src_indexes, padding_value=pad_token)
     src_lens = torch.tensor(src_lens)
     # make (bs, num_channels, w, h) as vgg accepts image in this format
-    mel_specs = torch.tensor(mel_specs).float().permute(0, 3, 1, 2).contiguous()
+    mel_specs = \
+        torch.tensor(mel_specs).float().permute(0, 3, 1, 2).contiguous()
     return {
         'lyrics_seq': src_indexes.to(device),
         'lyrics_lens': src_lens.to(device),
@@ -592,12 +638,13 @@ def batch_to_model_compatible_data_ae(vocab, pairs, device):
     return src_indexes.to(device), src_lens.to(device), target_indexes.to(device)
 
 
-def _btmcd(vocab, pairs, config):
+def _btmcd(vocab, pairs, config, *args):
     """alias for batch_to_model_compatible_data"""
     if config['model_code'] == 'bilstm_scorer':
         return batch_to_model_compatible_data_bilstm(vocab, pairs, config['device'])
     elif config['model_code'] == 'bimodal_scorer':
-        return batch_to_model_compatible_data_bimodal(vocab, pairs, config['device'])
+        # args[0] would be spec_array for this case
+        return batch_to_model_compatible_data_bimodal(vocab, pairs, config['device'], args[0])
     elif config['model_code'] in {'dae', 'vae'}:
         return batch_to_model_compatible_data_ae(vocab, pairs, config['device'])
     elif config['model_code'] == 'clf':

@@ -53,9 +53,9 @@ def main():
 
     with torch.no_grad():
         print('\n### Random Sampling ###:\n')
-        random_sampled = translate(vocab, model._random_sample(1000))
-        for s in random_sampled:
-            print(s)
+        random_sampled = translate(vocab, model._random_sample(10000))
+        with open('random_sampled_sf.txt', 'w') as f:
+            f.write('\n'.join(random_sampled))
 
         _, val_pairs, _ = preprocess.prepare_data(conf)
         s1 = random.choice(val_pairs)[0]
