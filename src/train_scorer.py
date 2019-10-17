@@ -130,12 +130,8 @@ def main():
                 x_train = preprocess._btmcd(vocab, iter_pairs, conf)
             # forward pass through the model
             predictions = model(x_train)
-            # y_train -> (bs)
-            scores, preds = torch.max(predictions, dim=1)
-            # entity to calculate the loss against. it's the scores in case
-            # of hinge loss, and predictions in case of cross entropy
-            y_hat = scores if 'scorer' in conf['model_code'] else predictions
-            loss = criterion(y_hat, y_train[iter: iter + conf['batch_size']])
+            # predictions -> (bs,) for scorers and (bs, num_clases) otherwise
+            loss = criterion(predictions, y_train[iter: iter + conf['batch_size']])
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), conf['clip'])
             optimizer.step()
@@ -160,16 +156,24 @@ def main():
                     x_val = preprocess._btmcd(vocab, iter_pairs, conf)
 
                 predictions = model(x_val)
-                scores, preds = torch.max(predictions, dim=1)
-                y_hat = scores if 'scorer' in conf['model_code'] else predictions
-                loss = criterion(y_hat, y_train[iter: iter + scores.shape[0]])
+                preds = torch.argmax(predictions, dim=1).cpu().numpy()
+
+                # Since we are using hinge loss for scorers the outputs would
+                # either 1 or -1. The block below gets the generated label
+                # for scoreres case
+                if 'scorer' in conf['model_code']:
+                    preds = np.array(list(
+                        map(lambda e: max(1, e) if e > 0 else min(-1, e),
+                            preds)))
+
+                loss = criterion(predictions, y_train[iter: iter + scores.shape[0]])
                 epoch_loss.append(loss.item())
-                generated = np.concatenate((generated, preds.cpu().numpy()))
+                generated = np.concatenate((generated, preds))
                 epoch_loss.append(loss.item())
 
             metrics.plot_confusion_matrix(
                 actual, generated, normalize=True,
-                classes=list(range(len(conf['filter_genre']))),
+                classes=conf['classes'],
                 epoch=e, model_code=conf['model_code'])
             performance = metrics.evaluate(actual, generated)
             print('Mean Validation Loss: {}'.format(np.mean(epoch_loss), '-'*30))
@@ -194,15 +198,23 @@ def main():
                         x_test = preprocess._btmcd(vocab, iter_pairs, conf)
 
                     predictions = model(x_test)
-                    scores, preds = torch.max(predictions, dim=1)
-                    y_hat = scores if 'scorer' in conf['model_code'] else predictions
-                    loss = criterion(y_hat, y_train[iter: iter + scores.shape[0]])
+                    preds = torch.argmax(predictions, dim=1).cpu().numpy()
+
+                    # Since we are using hinge loss for scorers the outputs would
+                    # either 1 or -1. The block below gets the generated label
+                    # for scoreres case
+                    if 'scorer' in conf['model_code']:
+                        preds = np.array(list(
+                            map(lambda e: max(1, e) if e > 0 else min(-1, e),
+                                preds)))
+
+                    loss = criterion(predictions, y_train[iter: iter + predictions.shape[0]])
                     epoch_loss.append(loss.item())
-                    generated = np.concatenate((generated, preds.cpu().numpy()))
+                    generated = np.concatenate((generated, preds))
 
                 metrics.plot_confusion_matrix(
                     actual, generated, normalize=True,
-                    classes=list(range(len(conf['filter_genre']))),
+                    classes=conf['classes'],
                     epoch=e, model_code=conf['model_code'])
                 performance = metrics.evaluate(actual, generated)
                 print('Mean Test Loss: {}'.format(np.mean(epoch_loss), '-'*30))

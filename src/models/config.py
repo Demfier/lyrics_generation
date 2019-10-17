@@ -43,7 +43,7 @@ model_config = {
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
     'use_embeddings?': True,  # use word embeddings or not
-    'first_run?': True,  # True for the very first run
+    'first_run?': False,  # True for the very first run
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
     'n_layers': 1,
     'filter_lang': 'english',
@@ -86,6 +86,7 @@ def get_dependent_params(model_config):
         os.mkdir(processed_path)
     model_config['vocab_path'] = '{}vocab.npy'.format(processed_path, m_code)
     model_config['filtered_emb_path'] = '{}english_w2v_filtered.hd5'.format(processed_path, m_code)
+    model_config['classes'] = list(range(len(model_config['filter_genre'])))
 
 
 get_dependent_params(model_config)
