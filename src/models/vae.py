@@ -80,11 +80,12 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         else:  # linear
             return min(1, step/self.x0)
 
-    def _random_sample(self, n):
+    def _random_sample(self, n, specs=None, scorer_emb_wts=None):
         self.z_temp = self.config['sampling_temperature']
         z = torch.randn(n, self.latent_dim).unsqueeze(0)
         y = (torch.ones(self.config['MAX_LENGTH'], n) * self.sos_idx).long()
-        return self._decode(z.to(self.device), y.to(self.device), infer=True)
+        return self._decode(z.to(self.device), y.to(self.device), infer=True,
+                            y_specs=specs, scorer_emb_wts=scorer_emb_wts)
 
     def _interpolate(self, z1, z2, steps):
         self.z_temp = self.config['sampling_temperature']
@@ -126,13 +127,13 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         log_sigma = encoder_dict['log_sigma']
         z = self._reparameterize(mu, log_sigma)
 
-        # decoder_outputs -> (max_y_len, bs, vocab_size)
+        # decoder_outputs -> (max_y_len, bs*beam_size, vocab_size)
         decoder_outputs = self._decode(z, y, infer)
 
         # loss calculation and backprop
         loss = self.rec_loss(
             decoder_outputs[1:].view(-1, decoder_outputs.shape[-1]),
-            y[1:].view(-1))
+            y.repeat(1, self.beam_size)[1:].view(-1))
 
         if step is not None:  # do kl annealing only for training phase
             kl_weight = self._get_kl_weight(step)

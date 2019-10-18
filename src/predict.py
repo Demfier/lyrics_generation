@@ -1,9 +1,12 @@
 import torch
 import random
+import pickle
 from utils import preprocess, metrics
 from models.config import model_config as conf
 from train_model import load_vocabulary, get_embedding_wts
 from models import dae, vae
+import h5py
+import numpy as np
 
 
 def translate(vocab, logits):
@@ -33,6 +36,20 @@ def get_z(x, x_lens, model):
     return model._reparameterize(mu, log_sigma)
 
 
+def get_specs(n):
+    with open('data/processed/bimodal_scorer/spec_array.pkl', 'rb') as f:
+        spec_array = pickle.load(f)
+    # randomly choose n spec_ids
+    spec_ids = np.random.choice(list(spec_array.keys()), size=n)
+    specs = [[spec_array[k]] for k in spec_ids]
+    return torch.tensor(specs).float().view(-1, 224, 224, 3).permute(0, 3, 1, 2).contiguous()
+
+
+def load_scorer_embeddings():
+    with h5py.File('data/processed/bimodal_scorer/english_w2v_filtered.hd5', 'r') as f:
+        return torch.from_numpy(np.array(f['data'])).float()
+
+
 def main():
     vocab = load_vocabulary()
     embedding_wts = get_embedding_wts(vocab)
@@ -53,7 +70,9 @@ def main():
 
     with torch.no_grad():
         print('\n### Random Sampling ###:\n')
-        random_sampled = translate(vocab, model._random_sample(10000))
+        random_sampled = translate(vocab, model._random_sample(9))
+        for s in random_sampled:
+            print(s)
         with open('random_sampled_sf.txt', 'w') as f:
             f.write('\n'.join(random_sampled))
 
@@ -64,13 +83,24 @@ def main():
         x1, x1_lens, _ = preprocess._btmcd(vocab, [(s1, s1)], conf)
         x2, x2_lens, _ = preprocess._btmcd(vocab, [(s2, s2)], conf)
 
-        print('\n### Linear Interpolation ###:\n')
-        print(s1)
-        interpolated = translate(vocab, model._interpolate(get_z(x1, x1_lens, model),
-                                                           get_z(x2, x2_lens, model), 50))
-        for s in interpolated:
+        # print('\n### Linear Interpolation ###:\n')
+        # print(s1)
+        # interpolated = translate(vocab, model._interpolate(get_z(x1, x1_lens, model),
+        #                                                    get_z(x2, x2_lens, model), 50))
+        # for s_id in range(0, len(interpolated), conf['beam_size']):
+        #     sentences = []
+        #     for i in range(conf['beam_size']):
+        #         sentences.append(interpolated[s_id+i])
+        #     print(sentences)
+        # print(s2)
+
+        print('\n### Testing VAE+Scoring function ###:\n')
+        n = 2
+        scorer_emb_wts = load_scorer_embeddings()
+        random_sampled = translate(vocab, model._random_sample(n, get_specs(n),
+                                                               scorer_emb_wts))
+        for s in random_sampled:
             print(s)
-        print(s2)
 
 
 if __name__ == '__main__':

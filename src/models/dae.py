@@ -73,34 +73,39 @@ class AutoEncoder(nn.Module):
         # Reconstruction loss
         self.rec_loss = nn.CrossEntropyLoss(ignore_index=self.pad_idx)
 
-    def _load_scorer_checkpoint(self, _type='rnn'):
+    def _load_scorer(self, emb_wts, _type='rnn'):
         if _type == 'rnn':
-            scorer = scoring_functions.RNNScorer()
+            scorer = scoring_functions.RNNScorer(self.config, emb_wts)
         elif _type == 'bimodal':
-            scorer = scoring_functions.BiModalScorer()
+            scorer = scoring_functions.BiModalScorer(self.config, emb_wts)
         else:
-            raise ValueError('Invalid scoring function given')
+            raise ValueError('Invalid scoring function type given')
 
         scorer.load_state_dict(
-            torch.load(self.config['scorer_path'],
+            torch.load('{}{}'.format(self.config['save_dir'],
+                                     self.config['pretrained_scorer']),
                        map_location=self.config['device'])['model'])
         return scorer
 
-    def _scoring_function(self, candidates, mel_specs):
+    def _scoring_function(self, old_scores, candidates,
+                          mel_specs, scorer_emb_wts):
         """
-        returns tokens for top k beams given a candidates out of all the possible
-        tokens in the vocab. It passes all the k*vocab_size possible sentences
-        through the pretrained scoring function and retuns the ones with
-        the least hinge loss
-        candidates: (t, bs, vocab_size) where t is the current time step
+        updates scores for all the candidates by measuring their compatability
+        with the respective spectrograms
+        candidates: (t, bs, k, vocab_size) where t is the current time step
+        mel_specs: (bs, 3, 224, 224)
         """
-        scorer = self._load_scorer_checkpoint('bimodal')
-        # Add vocab tokens to the candidates
-        # compatibility scores
-        scores = scorer({'lyrics_seq': candidates, 'mel_spec': mel_specs})
-        # topk_tokens -> (beam_size*bs)
-        _, token_ids = scores.topk(self.beam_size)
-        return topk_tokens
+        t, bs, k, v = candidates.shape
+        scorer = self._load_scorer(scorer_emb_wts, 'bimodal')
+        # compatibility scores -> (bs, beam_size*v)
+        scores = scorer({
+            'lyrics_seq': candidates.view(t, bs*k*v).long(),
+            'mel_spec': mel_specs.repeat(k*v, 1, 1, 1)
+            })
+        # adjust scores to make it broadcastable wrt old_scores
+        scores = scores.view(bs, self.beam_size).unsqueeze(0).unsqueeze(-1)
+        # return updated scores -> (t, bs, k, v)
+        return (old_scores * torch.exp(scores/self.config['scorer_temp']))
 
     def _encode(self, x, x_lens):
         max_x_len, bs = x.shape
@@ -136,7 +141,7 @@ class AutoEncoder(nn.Module):
         return torch.ne(tensor, self.pad_idx)
 
     def _decode(self, z, y, infer, encoder_outputs=None,
-                mask=None, y_specs=None):
+                mask=None, y_specs=None, scorer_emb_wts=None):
         """
         z -> (#enc_layers, batch_size x latent_dim)
         y -> (max_y_len, batch_size)
@@ -163,8 +168,11 @@ class AutoEncoder(nn.Module):
 
         if self.unit == 'lstm':
             # consider h_n = 0 for lstm
-            h_n = torch.zeros(self.config['dec_n_layers'], bs,
+            h_n = torch.zeros(self.config['dec_n_layers'], bs*self.beam_size,
                               self.latent_dim).to(self.device)
+            # doesn't make a different for beam_size = 1
+            dec_hidden = dec_hidden.repeat(1, self.beam_size, 1)
+            # dec_hidden => (#dec_layers, bs*beam_size, latent_dim)
             dec_hidden = (h_n, dec_hidden)
 
         # initial decoder input is <sos> token
@@ -183,22 +191,35 @@ class AutoEncoder(nn.Module):
             output, dec_hidden = self._decode_token(output, dec_hidden, mask)
             decoder_outputs[t] = output
             do_tf = random.random() < self.config['tf_ratio']
-            # always do greedy search for inference mode (y = None)
             if infer or (not do_tf):
                 if self.config['dec_mode'] == 'beam':
-                    # scoring function returns tokens for the topk beams
-                    # based on hinge loss
-                    candidates = torch.cat((decoder_outputs[:t+1], ouptut.unsqueeze(0)))
-                    # output -> (beam_size*bs)
-                    output = self._scoring_function(candidates, y_specs)
+                    # split beam and bs dim from dec_outputs
+                    candidates = decoder_outputs[:t].view(t, bs,
+                                                          self.beam_size,
+                                                          self.vocab.size)
+                    # run a softmax on the last dimension
+                    new_logits = torch.log_softmax(candidates, dim=-1)
+                    if y_specs is not None:
+                        new_logits = self._scoring_function(new_logits,
+                                                            candidates,
+                                                            y_specs,
+                                                            scorer_emb_wts)
+                    # extract probabilities of the tokens and flatten logits
+                    new_logits = new_logits[-1].squeeze(0).view(bs, -1)
+                    # new_logits => (bs, beam_size*vocab_size)
+                    # .topk returns scores and tokens of shape (bs, k)
+                    # the modulo operator is required to get real token ids
+                    # as its range would be beam_size*vocab_size otherwise
+                    output = new_logits.topk(k=self.beam_size, dim=-1)[1].view(-1) % self.vocab.size
+                    # output => (bs*beam_size)
                 else:
                     # output.max(1) -> (scores, tokens)
                     # doing a max along `dim=1` returns logit scores and
                     # token index for the most probable (max valued) token
                     # scores (& tokens) -> (bs)
-                    output = output.max(1)[1]  # greedy search
+                    output = output.max(dim=1)[1]  # greedy search
             elif do_tf:
-                output = y[t]
+                output = y[t].repeat(self.beam_size, 1).view(-1)
         return decoder_outputs
 
     def _decode_token(self, input, hidden, mask):
@@ -214,8 +235,8 @@ class AutoEncoder(nn.Module):
 
         # embedded -> (1, beam_size*bs, embedding_dim)
         embedded = self.dec_dropout(self.embedding(input))
-
         # output -> (1, beam_size*bs, hidden_dim) (decoder is unidirectional)
+        # h_n (and c_n) -> (1, beam_size*bs, hidden)
         output, hidden = self.decoder(embedded, hidden)
         output = self.output2vocab(torch.cat((output, embedded), dim=-1))
         # output -> (beam_size*bs, vocab_size)
@@ -261,13 +282,13 @@ class AutoEncoder(nn.Module):
 
         # z is the final forward and backward hidden state of all layers
         z = self._encode(x, x_lens)['z']
-        # decoder_outputs -> (max_y_len, bs, vocab_size)
+        # decoder_outputs -> (max_y_len, bs*beam_size, vocab_size)
         decoder_outputs = self._decode(z, y, infer)
 
         # loss calculation and backprop
         loss = self.rec_loss(
             decoder_outputs[1:].view(-1, decoder_outputs.shape[-1]),
-            y[1:].view(-1))
+            y.repeat(1, self.beam_size)[1:].view(-1))
 
         if not infer:
             loss.backward()

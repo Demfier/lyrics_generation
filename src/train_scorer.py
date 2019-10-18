@@ -73,9 +73,15 @@ def main():
     y_val = y_val.to(conf['device'])
     test_pairs, y_test = preprocess.read_pairs(conf, mode='test')
     y_test = y_test.to(conf['device'])
-    n_train = len(train_pairs)
     train_pairs = train_pairs[: conf['batch_size'] * (
-        n_train // conf['batch_size'])]
+        len(train_pairs) // conf['batch_size'])]
+    # train_pairs = train_pairs[:100]
+    # val_pairs = train_pairs[:500]
+    # test_pairs = train_pairs[:500]
+    # y_train = y_train[:100]
+    # y_val = y_val[:100]
+    # y_test = y_test[:100]
+    n_train = len(train_pairs)
     n_val = len(val_pairs)
     n_test = len(test_pairs)
     device = conf['device']
@@ -156,17 +162,18 @@ def main():
                     x_val = preprocess._btmcd(vocab, iter_pairs, conf)
 
                 predictions = model(x_val)
-                preds = torch.argmax(predictions, dim=1).cpu().numpy()
 
                 # Since we are using hinge loss for scorers the outputs would
                 # either 1 or -1. The block below gets the generated label
-                # for scoreres case
+                # for scorers case
                 if 'scorer' in conf['model_code']:
                     preds = np.array(list(
-                        map(lambda e: max(1, e) if e > 0 else min(-1, e),
-                            preds)))
+                        map(lambda e: 1 if e >= 0.5 else -1,
+                            predictions.cpu().numpy())))
+                else:
+                    preds = torch.argmax(predictions, dim=1).cpu().numpy()
 
-                loss = criterion(predictions, y_train[iter: iter + scores.shape[0]])
+                loss = criterion(predictions, y_train[iter: iter + predictions.shape[0]])
                 epoch_loss.append(loss.item())
                 generated = np.concatenate((generated, preds))
                 epoch_loss.append(loss.item())
@@ -198,15 +205,16 @@ def main():
                         x_test = preprocess._btmcd(vocab, iter_pairs, conf)
 
                     predictions = model(x_test)
-                    preds = torch.argmax(predictions, dim=1).cpu().numpy()
 
                     # Since we are using hinge loss for scorers the outputs would
                     # either 1 or -1. The block below gets the generated label
                     # for scoreres case
                     if 'scorer' in conf['model_code']:
                         preds = np.array(list(
-                            map(lambda e: max(1, e) if e > 0 else min(-1, e),
-                                preds)))
+                            map(lambda e: 1 if e >= 0.5 else -1,
+                                predictions.cpu().numpy())))
+                    else:
+                        preds = torch.argmax(predictions, dim=1).cpu().numpy()
 
                     loss = criterion(predictions, y_train[iter: iter + predictions.shape[0]])
                     epoch_loss.append(loss.item())

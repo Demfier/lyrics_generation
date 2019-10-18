@@ -13,6 +13,7 @@ model_config = {
     'k': 5e-3,  # slope of the logistic annealing function (for vae)
     'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
     'sampling_temperature': 5e-3,  # z_temp to be used during inference
+    'scorer_temp': 0.4,
 
     'clip': 50.0,  # values above which to clip the gradients
     'tf_ratio': 1.0,  # teacher forcing ratio
@@ -22,7 +23,7 @@ model_config = {
     'batch_size': 100,
     'enc_n_layers': 1,
     'dec_n_layers': 1,
-    'dec_mode': 'greedy',  # type of decoding to use {greedy, beam}
+    'dec_mode': 'beam',  # type of decoding to use {greedy, beam}
     'bidirectional': True,  # make the encoder bidirectional or not
     'attn_model': None,  # None/dot/concat/general
 
@@ -38,7 +39,7 @@ model_config = {
     'MAX_LENGTH': 30,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cpu' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
@@ -56,11 +57,11 @@ model_config = {
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
     'generate_spectrograms': False,
-    'pretrained_model': False,  # {'rec/vae-1L-bilstm-40', False},
-    'scorer_path': 'models/',
+    'pretrained_model': 'vae-1L-bilstm-11',  # {'rec/vae-1L-bilstm-40', False},
+    'pretrained_scorer': 'bimodal_scorer-1L-bilstm-0',
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
-    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
+    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
     # 'file_name': '/home/d35kumar/Github/lyrics_generation/data/raw/split_info.txt',
     # 'dali_path': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0',
     # 'dali_audio': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0/ogg_audio/',  # Path to store dali audio files
@@ -86,7 +87,9 @@ def get_dependent_params(model_config):
         os.mkdir(processed_path)
     model_config['vocab_path'] = '{}vocab.npy'.format(processed_path, m_code)
     model_config['filtered_emb_path'] = '{}english_w2v_filtered.hd5'.format(processed_path, m_code)
-    model_config['classes'] = list(range(len(model_config['filter_genre'])))
+    model_config['classes'] = [-1, 1] if 'scorer' in m_code else \
+        list(range(len(model_config['filter_genre'])))
+    model_config['save_dir'] += model_config['task'] + '/'
 
 
 get_dependent_params(model_config)

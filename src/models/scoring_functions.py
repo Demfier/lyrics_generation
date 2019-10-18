@@ -173,7 +173,7 @@ class BiModalScorer(nn.Module):
     def score(self, music, lyrics):
         # l2 => (bs, pf*lyrics_dim)
         l2 = F.mse_loss(music, lyrics, reduction='none')
-        return torch.mean(l2, dim=1)  # (bs)
+        return torch.sigmoid(torch.mean(l2, dim=1))  # (bs)
 
     def encoder(self, embedded):
         if self.unit == 'lstm':
@@ -186,8 +186,9 @@ class BiModalScorer(nn.Module):
         # music_melspec -> batch_size, num_channels, width, height (bs, 3, 224, 224) when
         # use_melfeats? is False else (batch_size, 1000)
         music_melspec = x['mel_spec']
-        # batch_size, max_sequence_length, embedding_dim
+        # max_sequence_length, batch_size, embedding_dim
         lyrics_embeddings = self.embedding(x['lyrics_seq'])
+        print(lyrics_embeddings.shape)
         if self.config['use_melfeats?']:
             raise NotImplementedError('Using direct image features not supported yet.')
         else:

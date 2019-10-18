@@ -50,17 +50,14 @@ def get_embedding_wts(vocab):
 def save_snapshot(model, epoch_num):
     if not os.path.exists(conf['save_dir']):
         os.mkdir(conf['save_dir'])
-    if not os.path.exists('{}/{}'.format(conf['save_dir'], conf['task'])):
-        os.mkdir('{}/{}'.format(conf['save_dir'], conf['task']))
     torch.save({
         'model': model.state_dict(),
         'epoch': epoch_num
-        }, '{}/{}/{}-{}L-{}{}-{}'.format(conf['save_dir'],
-                                         conf['task'],
-                                         conf['model_code'],
-                                         conf['enc_n_layers'],
-                                         'bi' if conf['bidirectional'] else '',
-                                         conf['unit'], epoch_num))
+        }, '{}{}-{}L-{}{}-{}'.format(conf['save_dir'],
+                                     conf['model_code'],
+                                     conf['enc_n_layers'],
+                                     'bi' if conf['bidirectional'] else '',
+                                     conf['unit'], epoch_num))
 
 
 def translate(vocab, logits, y, x, inputs, generated, ground_truth):
@@ -85,12 +82,13 @@ def translate(vocab, logits, y, x, inputs, generated, ground_truth):
                 break
         inputs.append(sentence)
 
-    for token_list in pred_tokens:
-        sentence = []
-        for t in token_list:
-            sentence.append(vocab.index2word[t.item()])
-            if t == conf['EOS_TOKEN']:
-                break
+    for sample_id in range(0, len(pred_tokens), conf['beam_size']):
+        for i in range(conf['beam_size']):
+            sentence = []
+            for t in pred_tokens[sample_id+i]:
+                sentence.append(vocab.index2word[t.item()])
+                if t == conf['EOS_TOKEN']:
+                    break
         generated.append(sentence)
 
     for token_list in gt_tokens:
