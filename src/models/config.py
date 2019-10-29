@@ -8,7 +8,7 @@ model_config = {
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
     # model-specific hyperparams
-    'anneal_till': 1500,  # for vae
+    'anneal_till': 350,  # for vae
     'x0': 5500,  # for vae
     'k': 5e-3,  # slope of the logistic annealing function (for vae)
     'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
@@ -39,7 +39,7 @@ model_config = {
     'MAX_LENGTH': 30,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cpu' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
@@ -50,15 +50,14 @@ model_config = {
     'filter_lang': 'english',
     'filter_genre': {'Pop', 'Rock', 'Alternative', 'Dance',
                      'Metal', 'Country', 'Electro', 'R&B'},
-    # 'filter_genre': {'Metal'},
     'embedding_dim': 300,
     'max_songs': 200,  # maximum songs to consider per genre
     'bidirectional': True,
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
     'generate_spectrograms': False,
-    'pretrained_model': 'vae-1L-bilstm-11',  # {'rec/vae-1L-bilstm-40', False},
-    'pretrained_scorer': 'bimodal_scorer-1L-bilstm-0',
+    'pretrained_model': 'vae-1L-bilstm-68',  # {'vae-1L-bilstm-11', False},
+    'pretrained_scorer': 'bimodal_scorer-1L-bilstm-0',  # {'bimodal_scorer-1L-bilstm-0', False}
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
     'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
@@ -69,7 +68,7 @@ model_config = {
     # 'spectrograms': '/home/d35kumar/Github/lyrics_generation/data/processed/spectrograms_split/'
     'dali_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
     'dali_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
-    'dali_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/lyrics.txt',  # Path to load dali lyrics
+    'dali_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/small_lyrics_info.txt',  # Path to load dali lyrics
     'split_spec': '/collection/gsahu/ae/lyrics_generation/data/processed/spectrograms_split/',  # Path to load dali lyrics
     # 'dali_path': '/home/gsahu/code/lyrics_generation/data/raw/DALI_v1.0/',
     # 'dali_audio': '/home/gsahu/code/lyrics_generation/data/raw/dali_audio/',  # Path to store dali audio files

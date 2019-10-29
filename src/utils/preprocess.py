@@ -14,6 +14,8 @@ from tqdm import tqdm
 import DALI as dali_code
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import train_test_split
+import scipy
+from scipy import misc
 
 import matplotlib.pyplot as plt
 
@@ -92,6 +94,40 @@ def process_bimodal(config):
     return dataset
 
 
+def process_lm(config):
+    """
+    This function creates a tsv file with lyrics and their corresponding genre
+    """
+    lm_data = ''
+    print('Loading DALI')
+    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
+                                               skip=[], keep=[])
+    file_ids = os.listdir(config['dali_path'])
+    genre_list = sorted(list(config['filter_genre']))
+    for f_id in file_ids:
+        if f_id in ['info', 'audio.zip']:
+            continue
+        # f_id is of the format id.gz. remove the gz part
+        f_id = f_id.split('.')[0]
+        annotations = dali_data[f_id].annotations
+        line_level = annotations['annot']['lines']
+        info = dali_data[f_id].info
+        if 'genres' not in info['metadata']:
+            continue
+        if info['metadata']['language'] != config['filter_lang']:
+            continue
+        genre = info['metadata']['genres']
+        if genre == []:
+            continue
+        genre = genre[0]
+        if genre not in genre_list:
+            continue
+        for l in line_level:
+            lm_data += '{}\t{}\t{}\n'.format(l['text'], genre, f_id)
+    with open('big_lyrics_info.txt', 'w') as f:
+        f.write(lm_data)
+
+
 def read_spectrogram_batch(spectrogram_paths):
     # remove alpha dimension and resize to 224x224
     return [skimage.transform.resize(s[:, :, :3], (224, 224, 3))
@@ -100,7 +136,7 @@ def read_spectrogram_batch(spectrogram_paths):
 
 def read_spectrogram(spectrogram_path):
     # remove alpha dimension and resize to 224x224
-    return skimage.transform.resize(
+    return scipy.misc.imresize(
         skimage.io.imread(spectrogram_path)[:, :, :3], (224, 224, 3)
         )
 
@@ -156,8 +192,15 @@ def process_ae(config):
     print('Loading lyrics dataset')
     with open(config['dali_lyrics'], 'r') as f:
         lyrics_info = f.readlines()
+    genre_count = {}
     for l in lyrics_info:
-        line, spec_path = l.split('\t')
+        line, genre, _ = l.split('\t')
+        if genre not in genre_count:
+            genre_count[genre] = 0
+        genre_count[genre] += 1
+        # take only `max_songs` number of songs for a genre
+        if genre_count[genre] > config['max_songs']:
+            continue
         dataset.append(line)
     return list(set(dataset))
 
@@ -171,11 +214,8 @@ def process_clf(config):
     with open(config['dali_lyrics'], 'r') as f:
         lyrics_info = f.readlines()
     genre_list = sorted(list(config['filter_genre']))
-    genres = []
-    spec_paths = []
-    for l in lyrics_info[:10000]:
+    for l in lyrics_info:
         line, spec_path = l.split('\t')
-        spec_paths.append(spec_path)
         # spec_path of the form:
         # {path_to_split_spectrograms}/8d2bea941a11497a984e50de3119b4d4_0.ogg
         # below command splits by '/', keep the last element, then splits by
@@ -183,7 +223,6 @@ def process_clf(config):
         spec_id = spec_path.split('/')[-1].split('_')[0]
         info = dali_data[spec_id].info
         genre = info['metadata']['genres'][0]  # consider 1st as the major one
-        genres.append(genre)
         # Note: this line whould throw an error if genre is not present in
         # genre_list but this shouldn't happen since the lyrics were filtered
         # using the same config. In other words, it's like a sanity check.
@@ -192,11 +231,6 @@ def process_clf(config):
                   'genre_id': genre_id,
                   'genre': genre}
         dataset.append(sample)
-    with open('genres.txt', 'w') as f:
-        f.write('\n'.join(genres))
-    with open('specs.txt', 'w') as f:
-        f.write('\n'.join(spec_paths))
-    return None
     return dataset
 
 
@@ -328,7 +362,7 @@ def read4bimodal(dataset):
         mel_paths.append(v['spec_id'])
 
     pairs = list(zip(lyrics_list, mel_paths))
-    y = [1] * len(pairs) + [-1] * len(pairs)
+    y = [1] * len(pairs) + [0] * len(pairs)
 
     # neg sampling
     total_samples = len(dataset)

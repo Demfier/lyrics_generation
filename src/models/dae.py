@@ -1,5 +1,6 @@
 import torch
 import random
+from tqdm import tqdm
 from torch import nn, optim
 from models import attn_module
 from models import scoring_functions
@@ -84,26 +85,38 @@ class AutoEncoder(nn.Module):
         scorer.load_state_dict(
             torch.load('{}{}'.format(self.config['save_dir'],
                                      self.config['pretrained_scorer']),
-                       map_location=self.config['device'])['model'])
-        return scorer
+                       map_location=self.device)['model'])
+        return scorer.to(self.device)
 
-    def _scoring_function(self, old_scores, candidates,
-                          mel_specs, scorer_emb_wts):
+    def _get_scores(self, old_scores, candidates, mel_specs, scorer):
         """
         updates scores for all the candidates by measuring their compatability
         with the respective spectrograms
         candidates: (t, bs, k, vocab_size) where t is the current time step
         mel_specs: (bs, 3, 224, 224)
         """
-        t, bs, k, v = candidates.shape
-        scorer = self._load_scorer(scorer_emb_wts, 'bimodal')
+        # t, bs, k, v = candidates.shape
+        # n_candidates = bs*k*v
+        t, n_candidates = candidates.shape
+        k = self.beam_size
+        v = self.vocab.size
+        # candidates = candidates.view(t, bs*k*v).long()
+        candidates = candidates.long()
+        scores = torch.empty(0).to(self.device)
         # compatibility scores -> (bs, beam_size*v)
-        scores = scorer({
-            'lyrics_seq': candidates.view(t, bs*k*v).long(),
-            'mel_spec': mel_specs.repeat(k*v, 1, 1, 1)
-            })
+        # print('Passing candidates through {}'.format(type(scorer).__name__))
+        continue_count = 0
+        for iter in tqdm(range(0, n_candidates, self.config['batch_size'])):
+            curr_candidates = candidates[:, iter:iter+self.config['batch_size']]
+            curr_mel_specs = mel_specs[iter // (k*v)].unsqueeze(0).repeat(
+                curr_candidates.shape[1], 1, 1, 1)
+            curr_scores = scorer({
+                'lyrics_seq': curr_candidates,
+                'mel_spec': curr_mel_specs
+                })[:, 1]  # get scores for class 1
+            scores = torch.cat((scores, curr_scores))
         # adjust scores to make it broadcastable wrt old_scores
-        scores = scores.view(bs, self.beam_size).unsqueeze(0).unsqueeze(-1)
+        scores = scores.view(-1, k, v).unsqueeze(0)
         # return updated scores -> (t, bs, k, v)
         return (old_scores * torch.exp(scores/self.config['scorer_temp']))
 
@@ -152,9 +165,26 @@ class AutoEncoder(nn.Module):
         max_y_len, bs = y.shape
         vocab_size = self.vocab.size
 
-        # tensor to store decoder outputs
-        decoder_outputs = torch.zeros(max_y_len, bs*self.beam_size,
-                                      vocab_size).to(self.device)
+        if y_specs is not None:
+            scorer = self._load_scorer(scorer_emb_wts, 'bimodal')
+            # tensor to maintain the already guess subsequence for k beams
+            # this tensor is intialized such that it has all vocab tokens as
+            # candidates for the k beams but at each time step, we will
+            # replace all of them with a single token for each beam
+            # candidate_subseq => (max_y_len, bs*k*vocab)
+            scorer_vocab = scorer_emb_wts.shape[0]
+            candidate_subseq = torch.arange(scorer_vocab).repeat(
+                bs*self.beam_size).unsqueeze(0).repeat(max_y_len, 1).to(
+                self.device)
+            candidate_subseq[0] = torch.ones(
+                scorer_vocab*bs*self.beam_size)*self.sos_idx
+            # tensor to store decoder outputs
+            decoder_outputs = (torch.ones(max_y_len, bs*self.beam_size,
+                               scorer_vocab)*self.sos_idx).to(self.device)
+        else:
+            # tensor to store decoder outputs
+            decoder_outputs = (torch.ones(max_y_len, bs*self.beam_size,
+                               vocab_size)*self.sos_idx).to(self.device)
 
         # Reconstruct the hidden vector from z
         # if #dec_layers > #enc_layers, use currently obtained hidden
@@ -194,24 +224,30 @@ class AutoEncoder(nn.Module):
             if infer or (not do_tf):
                 if self.config['dec_mode'] == 'beam':
                     # split beam and bs dim from dec_outputs
-                    candidates = decoder_outputs[:t].view(t, bs,
+                    new_logits = decoder_outputs[:t].view(t, bs,
                                                           self.beam_size,
-                                                          self.vocab.size)
+                                                          vocab_size)
                     # run a softmax on the last dimension
-                    new_logits = torch.log_softmax(candidates, dim=-1)
+                    new_logits = torch.log_softmax(new_logits, dim=-1)
                     if y_specs is not None:
-                        new_logits = self._scoring_function(new_logits,
-                                                            candidates,
-                                                            y_specs,
-                                                            scorer_emb_wts)
+                        candidates = candidate_subseq[:t+1]
+                        new_logits = self._get_scores(new_logits,
+                                                      candidates,
+                                                      y_specs,
+                                                      scorer)
                     # extract probabilities of the tokens and flatten logits
                     new_logits = new_logits[-1].squeeze(0).view(bs, -1)
                     # new_logits => (bs, beam_size*vocab_size)
                     # .topk returns scores and tokens of shape (bs, k)
                     # the modulo operator is required to get real token ids
                     # as its range would be beam_size*vocab_size otherwise
-                    output = new_logits.topk(k=self.beam_size, dim=-1)[1].view(-1) % self.vocab.size
+                    output = new_logits.topk(k=self.beam_size, dim=-1)[1].view(
+                        -1) % self.vocab.size
                     # output => (bs*beam_size)
+                    if y_specs is not None:
+                        # replace all the tokens at time t with the guessed
+                        # token for k beams
+                        candidate_subseq[t] = output.repeat(vocab_size)
                 else:
                     # output.max(1) -> (scores, tokens)
                     # doing a max along `dim=1` returns logit scores and

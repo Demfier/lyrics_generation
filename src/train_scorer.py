@@ -99,7 +99,7 @@ def main():
         print('Genres: {}'.format(', '.join(sorted(list(conf['filter_genre'])))))
     model = model.to(device)
     if 'scorer' in conf['model_code']:
-        criterion = nn.HingeEmbeddingLoss()  # to train scoring function
+        criterion = nn.NLLLoss()  # to train scoring function
     else:
         criterion = nn.CrossEntropyLoss(reduction='sum')  # to train genre classifier
     optimizer = optim.Adam(model.parameters(), lr=conf['lr'])
@@ -162,17 +162,7 @@ def main():
                     x_val = preprocess._btmcd(vocab, iter_pairs, conf)
 
                 predictions = model(x_val)
-
-                # Since we are using hinge loss for scorers the outputs would
-                # either 1 or -1. The block below gets the generated label
-                # for scorers case
-                if 'scorer' in conf['model_code']:
-                    preds = np.array(list(
-                        map(lambda e: 1 if e >= 0.5 else -1,
-                            predictions.cpu().numpy())))
-                else:
-                    preds = torch.argmax(predictions, dim=1).cpu().numpy()
-
+                preds = torch.argmax(predictions, dim=1).cpu().numpy()
                 loss = criterion(predictions, y_train[iter: iter + predictions.shape[0]])
                 epoch_loss.append(loss.item())
                 generated = np.concatenate((generated, preds))
@@ -206,16 +196,7 @@ def main():
 
                     predictions = model(x_test)
 
-                    # Since we are using hinge loss for scorers the outputs would
-                    # either 1 or -1. The block below gets the generated label
-                    # for scoreres case
-                    if 'scorer' in conf['model_code']:
-                        preds = np.array(list(
-                            map(lambda e: 1 if e >= 0.5 else -1,
-                                predictions.cpu().numpy())))
-                    else:
-                        preds = torch.argmax(predictions, dim=1).cpu().numpy()
-
+                    preds = torch.argmax(predictions, dim=1).cpu().numpy()
                     loss = criterion(predictions, y_train[iter: iter + predictions.shape[0]])
                     epoch_loss.append(loss.item())
                     generated = np.concatenate((generated, preds))

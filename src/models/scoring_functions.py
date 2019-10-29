@@ -126,6 +126,7 @@ class BiModalScorer(nn.Module):
         self.config = config
         self.dropout = config['dropout']
         self.embedding_wts = embedding_wts
+        self.output_dim = 2  # we want to return a score
         self.embedding = nn.Embedding.from_pretrained(embedding_wts,
                                                       freeze=False)
         self.embedding_dropout = nn.Dropout(config['dropout'])
@@ -159,21 +160,25 @@ class BiModalScorer(nn.Module):
         for p in self.img_encoder.classifier.parameters():
             p.requires_grad = True
 
-        # we need to bring music and lyrics features to a same dimension
-        # to calculate the loss (or we can append zeros to shorter ones
-        # but that's more like a hack)
-        self.to_lyrics_dim = nn.Linear(
-            self.img_encoder.classifier[6].out_features,
-            self.pf*config['hidden_dim'])
+        # We will concatenate img and lyrics features, so input size becomes
+        # 1000 (from vgg16) + 2*hidden_dim (from rnn)
+        self.final_in_features = \
+            self.img_encoder.classifier[6].out_features + \
+            self.pf*self.config['hidden_dim']
+
+        self.out = nn.Sequential(
+            nn.Linear(self.final_in_features, self.final_in_features // 2),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.final_in_features // 2, self.output_dim))
+
+        self.softmax = nn.LogSoftmax(dim=1)
 
     def pool(self, rnn_output):
         pool_func = F.avg_pool1d if self.avg_pool else F.max_pool1d
         return pool_func(rnn_output, rnn_output.size(2)).squeeze(2)
 
-    def score(self, music, lyrics):
-        # l2 => (bs, pf*lyrics_dim)
-        l2 = F.mse_loss(music, lyrics, reduction='none')
-        return torch.sigmoid(torch.mean(l2, dim=1))  # (bs)
+    def fusion(self, music, lyrics):
+        return torch.cat((music, lyrics), dim=-1)
 
     def encoder(self, embedded):
         if self.unit == 'lstm':
@@ -188,17 +193,16 @@ class BiModalScorer(nn.Module):
         music_melspec = x['mel_spec']
         # max_sequence_length, batch_size, embedding_dim
         lyrics_embeddings = self.embedding(x['lyrics_seq'])
-        print(lyrics_embeddings.shape)
         if self.config['use_melfeats?']:
             raise NotImplementedError('Using direct image features not supported yet.')
         else:
             # (batch_size, 1000)
             music_features = self.img_encoder(music_melspec)
 
-        bs, music_dims = music_features.shape
         lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
         lyrics_pool = self.pool(lyrics_output.permute(1, 2, 0))
-        return self.score(self.to_lyrics_dim(music_features), lyrics_pool)
+        # bs, output_dim
+        return self.softmax(self.out(self.fusion(music_features, lyrics_pool)))
 
 
 class GenreClassifier(BiModalScorer):
