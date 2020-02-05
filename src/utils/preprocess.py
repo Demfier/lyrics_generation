@@ -23,7 +23,6 @@ import matplotlib.pyplot as plt
 def process_raw(config):
     """
     process dali dataset and construct the train, val and test dataset
-    NOTE: DALI info is not being used as we are not dealing with audio for now
     """
     if config['model_code'] == 'bilstm_scorer':
         dataset = process_bilstm(config)
@@ -187,10 +186,10 @@ def process_bilstm(config):
     return uniq_dictlist(dataset)
 
 
-def process_ae(config):
+def process_ae_dali(config):
     dataset = []
     print('Loading lyrics dataset')
-    with open(config['dali_lyrics'], 'r') as f:
+    with open(config['dataset_lyrics'], 'r') as f:
         lyrics_info = f.readlines()
     genre_count = {}
     for l in lyrics_info:
@@ -202,6 +201,21 @@ def process_ae(config):
         if genre_count[genre] > config['max_songs']:
             continue
         dataset.append(line)
+    return list(set(dataset))
+
+
+def process_ae(config):
+    dataset = []
+    print('Loading lyrics dataset')
+    with open(config['dataset_lyrics'], 'r') as f:
+        lyrics = f.readlines()
+    for line in lyrics:
+        # remove all punctuations from the line
+        dataset.append(
+            line.translate(
+                str.maketrans('', '', string.punctuation)
+                )
+            )
     return list(set(dataset))
 
 
@@ -248,7 +262,7 @@ def freq2note(freq):
 
 
 def create_train_val_split(dataset, config):
-    train, testval = train_test_split(dataset, train_size=0.8)
+    train, testval = train_test_split(dataset, test_size=0.2)
     test, val = train_test_split(testval, test_size=0.5)
 
     with open('data/processed/{}/train.pkl'.format(config['model_code']), 'wb') as f:

@@ -7,6 +7,8 @@ model_config = {
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
+    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
+
     # model-specific hyperparams
     'anneal_till': 350,  # for vae
     'x0': 5500,  # for vae
@@ -23,7 +25,7 @@ model_config = {
     'batch_size': 100,
     'enc_n_layers': 1,
     'dec_n_layers': 1,
-    'dec_mode': 'beam',  # type of decoding to use {greedy, beam}
+    'dec_mode': 'greedy',  # type of decoding to use {greedy, beam}
     'bidirectional': True,  # make the encoder bidirectional or not
     'attn_model': None,  # None/dot/concat/general
 
@@ -47,28 +49,32 @@ model_config = {
     'first_run?': False,  # True for the very first run
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
     'n_layers': 1,
+
+    # DALI-specific
     'filter_lang': 'english',
     'filter_genre': {'Pop', 'Rock', 'Alternative', 'Dance',
                      'Metal', 'Country', 'Electro', 'R&B'},
-    'embedding_dim': 300,
     'max_songs': 200,  # maximum songs to consider per genre
+
+    'embedding_dim': 300,
     'bidirectional': True,
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
     'generate_spectrograms': False,
-    'pretrained_model': 'vae-1L-bilstm-68',  # {'vae-1L-bilstm-11', False},
-    'pretrained_scorer': 'bimodal_scorer-1L-bilstm-0',  # {'bimodal_scorer-1L-bilstm-0', False}
+    'pretrained_model': False,  # {'vae-1L-bilstm-11', False},
+    'pretrained_scorer': False,  # {'bimodal_scorer-1L-bilstm-0', False}
+    # 'pretrained_model': 'vae-1L-bilstm-68',  # {'vae-1L-bilstm-11', False},
+    # 'pretrained_scorer': 'bimodal_scorer-1L-bilstm-0',  # {'bimodal_scorer-1L-bilstm-0', False}
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
-    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
     # 'file_name': '/home/d35kumar/Github/lyrics_generation/data/raw/split_info.txt',
     # 'dali_path': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0',
     # 'dali_audio': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0/ogg_audio/',  # Path to store dali audio files
     # 'dali_audio_split': '/home/d35kumar/Github/lyrics_generation/data/raw/DALI_v1.0/ogg_audio_split/', # Path to store dali audio files split by lines
     # 'spectrograms': '/home/d35kumar/Github/lyrics_generation/data/processed/spectrograms_split/'
-    'dali_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
-    'dali_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
-    'dali_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/small_lyrics_info.txt',  # Path to load dali lyrics
+    'dataset_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
+    'dataset_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
+    'dataset_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/final_lyrics.txt',  # Path to load dali lyrics
     'split_spec': '/collection/gsahu/ae/lyrics_generation/data/processed/spectrograms_split/',  # Path to load dali lyrics
     # 'dali_path': '/home/gsahu/code/lyrics_generation/data/raw/DALI_v1.0/',
     # 'dali_audio': '/home/gsahu/code/lyrics_generation/data/raw/dali_audio/',  # Path to store dali audio files
