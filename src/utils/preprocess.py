@@ -3,6 +3,7 @@ import re
 import sys
 import h5py
 import torch
+import string
 import gensim
 import pickle
 import random
@@ -33,10 +34,11 @@ def process_raw(config):
     elif config['model_code'] == 'clf':
         dataset = process_clf(config)
 
-    with open('data/processed/{}/combined_dataset.pkl'.format(
-            config['model_code']), 'wb') as f:
+    save_path = 'data/processed/{}/combined_dataset.pkl'.format(
+        config['model_code'])
+    with open(save_path, 'wb') as f:
         pickle.dump(dataset, f)
-    print('Created processed dataset')
+    print('Saved processed dataset at: {}'.format(save_path))
     return dataset
 
 
@@ -188,7 +190,7 @@ def process_bilstm(config):
 
 def process_ae_dali(config):
     dataset = []
-    print('Loading lyrics dataset')
+    print('Loading lyrics dataset at {}'.format(config['dataset_lyrics']))
     with open(config['dataset_lyrics'], 'r') as f:
         lyrics_info = f.readlines()
     genre_count = {}
@@ -206,7 +208,7 @@ def process_ae_dali(config):
 
 def process_ae(config):
     dataset = []
-    print('Loading lyrics dataset')
+    print('Loading lyrics dataset at {}'.format(config['dataset_lyrics']))
     with open(config['dataset_lyrics'], 'r') as f:
         lyrics = f.readlines()
     for line in lyrics:
