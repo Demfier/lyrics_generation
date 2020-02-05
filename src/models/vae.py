@@ -9,7 +9,8 @@ from torchvision.models import vgg16
 class VariationalAutoEncoder(dae.AutoEncoder):
     """docstring for VariationalAutoencoder"""
     def __init__(self, config, vocab, embedding_weights):
-        super(VariationalAutoEncoder, self).__init__(config, vocab, embedding_weights)
+        super(VariationalAutoEncoder, self).__init__(config, vocab,
+                                                     embedding_weights)
         self.add_vae_attrs()
 
     def add_vae_attrs(self):
@@ -163,24 +164,31 @@ class VariationalAutoEncoder(dae.AutoEncoder):
 class BimodalVED(dae.AutoEncoder):
     """docstring for VariationalEncoderDecoder"""
     def __init__(self, config, vocab, embedding_weights):
-        super(VariationalEncoderDecoder, self).__init__(config, vocab, embedding_weights)
+        super(VariationalEncoderDecoder, self).__init__(config, vocab,
+                                                        embedding_weights)
         self.add_ved_attrs()
 
     def add_ved_attrs(self):
         self.img_encoder = vgg16(pretrained=True)
-        self.img_dim = self.img_encoder.classifier[6].out_features
-        self.img2hidden = self.out = nn.Sequential(
+        self.img_dim = self.img_encoder.classifier[0].in_features
+
+        # Keep the last layer trainable
+        for p in self.img_encoder.parameters():
+            p.requires_grad = True
+
+        self.img_encoder.classifier = nn.Sequential(
             nn.Linear(self.img_dim, self.img_dim // 2),
             nn.ReLU(inplace=True),
-            nn.Linear(self.img_dim // 2, self.output_dim))
-        # Keep the last layer trainable
-        for p in self.img_encoder.classifier.parameters():
-            p.requires_grad = True
+            nn.Linear(self.img_dim // 2, 1000))
+
+        self.img2hidden = nn.Sequential(
+            nn.Dropout(self.dropout),
+            nn.Linear(1000, self.hidden_dim))
 
     def _encode(self, x):
         max_x_len, bs = x.shape
         # convert input images to embeddings
-        outputs = self.img_encoder(x)  # bs x img_dim
+        outputs = self.img_encoder(x)  # bs x 1000
         hidden = self.img2hidden(outputs)  # bs x hidden_dim
         # Forward pass through the encoder
         return {

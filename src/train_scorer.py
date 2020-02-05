@@ -98,10 +98,7 @@ def main():
         model = GenreClassifier(conf, embedding_wts)
         print('Genres: {}'.format(', '.join(sorted(list(conf['filter_genre'])))))
     model = model.to(device)
-    if 'scorer' in conf['model_code']:
-        criterion = nn.NLLLoss()  # to train scoring function
-    else:
-        criterion = nn.CrossEntropyLoss(reduction='sum')  # to train genre classifier
+    criterion = nn.CrossEntropyLoss(reduction='sum')  # to train genre classifier
     optimizer = optim.Adam(model.parameters(), lr=conf['lr'])
     if conf['pretrained_model']:
         print('Restoring {}...'.format(conf['pretrained_model']))

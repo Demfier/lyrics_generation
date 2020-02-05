@@ -18,7 +18,6 @@ class RNNScorer(nn.Module):
         self.output_dim = 1
         self.embedding = nn.Embedding.from_pretrained(embedding_wts,
                                                       freeze=False)
-        self.embedding_dropout = nn.Dropout(config['dropout'])
         self.bidirectional = config['bidirectional']
         self.unit = config['unit']
         self.pf = (2 if self.bidirectional else 1)
@@ -129,7 +128,6 @@ class BiModalScorer(nn.Module):
         self.output_dim = 2  # we want to return a score
         self.embedding = nn.Embedding.from_pretrained(embedding_wts,
                                                       freeze=False)
-        self.embedding_dropout = nn.Dropout(config['dropout'])
         self.bidirectional = config['bidirectional']
         self.unit = config['unit']
         self.pf = (2 if self.bidirectional else 1)
@@ -156,22 +154,24 @@ class BiModalScorer(nn.Module):
                               bidirectional=self.bidirectional)
 
         self.img_encoder = vgg16(pretrained=True)
-        # Keep the last layer trainable
-        for p in self.img_encoder.classifier.parameters():
+        # Keep VGG trainable
+        for p in self.img_encoder.parameters():
             p.requires_grad = True
 
         # We will concatenate img and lyrics features, so input size becomes
-        # 1000 (from vgg16) + 2*hidden_dim (from rnn)
+        # ~25k (from vgg16) + 2*hidden_dim (from rnn)
         self.final_in_features = \
-            self.img_encoder.classifier[6].out_features + \
+            self.img_encoder.classifier[0].in_features + \
             self.pf*self.config['hidden_dim']
 
-        self.out = nn.Sequential(
-            nn.Linear(self.final_in_features, self.final_in_features // 2),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.final_in_features // 2, self.output_dim))
+        self.img_encoder.classifier = nn.Sequential(
+            nn.Linear(self.img_encoder.classifier[0].in_features, 512),
+            nn.Linear(512, 128),
+            nn.Linear(128, 50))
 
-        self.softmax = nn.LogSoftmax(dim=1)
+        self.out = nn.Sequential(
+            nn.Dropout(self.dropout),
+            nn.Linear(50 + self.pf*self.config['hidden_dim']), self.output_dim)
 
     def pool(self, rnn_output):
         pool_func = F.avg_pool1d if self.avg_pool else F.max_pool1d
@@ -196,13 +196,13 @@ class BiModalScorer(nn.Module):
         if self.config['use_melfeats?']:
             raise NotImplementedError('Using direct image features not supported yet.')
         else:
-            # (batch_size, 1000)
+            # (batch_size, 50)
             music_features = self.img_encoder(music_melspec)
 
         lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
         lyrics_pool = self.pool(lyrics_output.permute(1, 2, 0))
         # bs, output_dim
-        return self.softmax(self.out(self.fusion(music_features, lyrics_pool)))
+        return self.out(self.fusion(music_features, lyrics_pool))
 
 
 class GenreClassifier(BiModalScorer):
