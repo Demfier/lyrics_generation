@@ -39,7 +39,7 @@ def load_vocabulary():
 
 def get_embedding_wts(vocab):
     if conf['first_run?']:
-        print('First run: GENERATING filtered embeddings.')
+        print('First run: GENERATING filtered embeddings...')
         embedding_wts = preprocess.generate_word_embeddings(vocab, conf)
     else:
         print('LOADING filtered embeddings.')

@@ -38,7 +38,12 @@ model_config = {
     'SOS_TOKEN': 1,
     'EOS_TOKEN': 2,
     'UNK_TOKEN': 3,
-    'MAX_LENGTH': 30,  # Max length of a sentence
+    'MAX_LENGTH': 25,  # Max length of a sentence
+    # Some metadata for the new lyrics dataset
+    # avg. sentence length = 6.8
+    # max sentence length = 25
+    # sentence length v/s frequency:
+    # Counter({6: 215713, 5: 197313, 7: 183332, 4: 150900, 8: 147375, 9: 107612, 10: 78934, 3: 76527, 11: 51589, 12: 32846, 2: 27430, 13: 19102, 14: 11323, 1: 7100, 15: 6727, 16: 4049, 17: 1881, 18: 715, 19: 194, 20: 48, 21: 14, 22: 2, 23: 2, 0: 1, 24: 1, 25: 1})
 
     # run-time conf
     'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
@@ -46,7 +51,7 @@ model_config = {
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
     'use_embeddings?': True,  # use word embeddings or not
-    'first_run?': False,  # True for the very first run
+    'first_run?': True,  # True for the very first run
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
     'n_layers': 1,
 
@@ -91,7 +96,8 @@ def get_dependent_params(model_config):
     if not os.path.exists(processed_path):
         os.mkdir(processed_path)
     model_config['vocab_path'] = '{}vocab.npy'.format(processed_path, m_code)
-    model_config['filtered_emb_path'] = '{}english_w2v_filtered.hd5'.format(processed_path, m_code)
+    model_config['filtered_emb_path'] = \
+        '{}english_w2v_filtered.hd5'.format(processed_path)
     model_config['classes'] = [-1, 1] if 'scorer' in m_code else \
         list(range(len(model_config['filter_genre'])))
     model_config['save_dir'] += model_config['task'] + '/'

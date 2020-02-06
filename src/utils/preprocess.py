@@ -15,6 +15,7 @@ from tqdm import tqdm
 import DALI as dali_code
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import train_test_split
+from .classes import Vocabulary
 import scipy
 from scipy import misc
 
@@ -212,6 +213,7 @@ def process_ae(config):
     with open(config['dataset_lyrics'], 'r') as f:
         lyrics = f.readlines()
     for line in lyrics:
+        line = line.strip()
         # remove all punctuations from the line
         dataset.append(
             line.translate(
@@ -274,42 +276,6 @@ def create_train_val_split(dataset, config):
     with open('data/processed/{}/val.pkl'.format(config['model_code']), 'wb') as f:
         pickle.dump(val, f)
     print('Split dataset')
-
-
-# Vocab and file-reading part
-class Vocabulary(object):
-    """Vocabulary class"""
-    def __init__(self):
-        super(Vocabulary, self).__init__()
-        self.word2index = {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
-        self.word2count = {}
-        self.index2word = {0: '<PAD>', 1: '<SOS>', 2: '<EOS>', 3: '<UNK>'}
-        self.size = 4  # count the special tokens above
-
-    def add_sentence(self, sentence):
-        for word in sentence.strip().split():
-            self.add_word(word)
-
-    def add_word(self, word):
-        if word not in self.word2index:
-            self.word2index[word] = self.size
-            self.word2count[word] = 1
-            self.index2word[self.size] = word
-            self.size += 1
-        else:
-            self.word2count[word] += 1
-
-    def sentence2index(self, sentence):
-        indexes = []
-        for w in sentence.split():
-            try:
-                indexes.append(self.word2index[w])
-            except KeyError as e:  # handle OOV
-                indexes.append(self.word2index['<UNK>'])
-        return indexes
-
-    def index2sentence(self, indexes):
-        return [self.index2word[i] for i in indexes]
 
 
 def build_vocab(config):
@@ -495,6 +461,7 @@ def filter_pairs(pairs, config):
     elif config['model_code'] == 'clf':
         return [' '.join(l.split()[:max_len])
                 for l in pairs if l]
+    # for seq2seq-type models
     return [(' '.join(pair[0].split()[:max_len]),
              ' '.join(pair[1].split()[:max_len]))
             for pair in pairs if pair[0] and pair[1]]
@@ -503,35 +470,33 @@ def filter_pairs(pairs, config):
 # Embeddings part
 def generate_word_embeddings(vocab, config):
     # Load original (raw) embeddings
-    ftype = 'bin'
-
-    src_embeddings = gensim.models.KeyedVectors.load_word2vec_format(
-        'data/raw/english_w2v.bin', binary=True)
+    src_embeddings = gensim.models.Word2Vec.load('data/processed/english_w2v.pkl')
 
     # Create filtered embeddings
     # Initialize filtered embedding matrix
-    combined_embeddings = np.zeros((vocab.size, config['embedding_dim']))
+    embeddings_matrix = np.zeros((vocab.size, config['embedding_dim']))
     for index, word in vocab.index2word.items():
         try:  # random normal for special and OOV tokens
             if index <= 4:
-                combined_embeddings[index] = \
+                embeddings_matrix[index] = \
                     np.random.normal(size=(config['embedding_dim'], ))
                 continue  # use continue to avoid extra `else` block
-            combined_embeddings[index] = src_embeddings[word]
+            embeddings_matrix[index] = src_embeddings[word]
         except KeyError as e:
-            combined_embeddings[index] = \
+            embeddings_matrix[index] = \
                 np.random.normal(size=(config['embedding_dim'], ))
 
     with h5py.File(config['filtered_emb_path'], 'w') as f:
-        f.create_dataset('data', data=combined_embeddings, dtype='f')
-    return torch.from_numpy(combined_embeddings).float()
+        f.create_dataset('data', data=embeddings_matrix, dtype='f')
+    return torch.from_numpy(embeddings_matrix).float()
+
+
+def load_word_embeddings(config):
+    with h5py.File(config['filtered_emb_path'], 'r') as f:
+        return torch.from_numpy(np.array(f['data'])).float()
 
 
 def prepare_data(config):
-    data_dir = config['data_dir']
-    task = config['model_code']
-    max_len = config['MAX_LENGTH']
-
     train_pairs = filter_pairs(read_pairs(config, 'train')[0], config)
     val_pairs = filter_pairs(read_pairs(config, 'val')[0], config)
     test_pairs = filter_pairs(read_pairs(config, 'test')[0], config)
@@ -540,11 +505,6 @@ def prepare_data(config):
     np.random.shuffle(val_pairs)
     np.random.shuffle(test_pairs)
     return train_pairs, val_pairs, test_pairs
-
-
-def load_word_embeddings(config):
-    with h5py.File(config['filtered_emb_path'], 'r') as f:
-        return torch.from_numpy(np.array(f['data'])).float()
 
 
 def batch_to_model_compatible_data_bilstm(vocab, pairs, device):
