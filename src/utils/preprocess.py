@@ -44,6 +44,45 @@ def process_raw(config):
 
 
 def process_bimodal(config):
+    """
+    This step loads the lyrics data along with its spec file's name
+    """
+    print('Loading bimodal dataset')
+    with open(config['dataset_lyrics']) as f:
+        lines = f.readlines()
+        np.random.shuffle(lines)
+
+    dataset = []
+    spec_array = {}
+
+    for line in tqdm(lines):
+        # eg: DepecheMode_waiting-for-the-night_0.png   I'm waiting for the night to fall
+        try:
+            spec_id, lyrics = line.split('\t')
+            artist = spec_id.split('_', 1)[0]
+            lyrics = normalize_string(
+                lyrics.translate(str.maketrans('', '', string.punctuation)))
+            mel_path = '{}{}/Specs/{}'.format(config['split_spec'], artist, spec_id)
+            if not os.path.exists(mel_path):  # skip if spec doesn't exist
+                continue
+            for l in get_subsequences(line):
+                sample = {}
+                sample['spec_id'] = spec_id
+                sample['lyrics'] = lyrics.strip()
+                sample['mel_path'] = mel_path
+                dataset.append(sample)
+                spec_array[spec_id] = read_spectrogram(mel_path)
+        except ValueError as e:
+            print('skipping {}...due to value error'.format(line), end='')
+
+    print('Saving Mel Spec arrays...')
+    with open('data/processed/{}/spec_array.pkl'.format(
+            config['model_code']), 'wb') as f:
+        pickle.dump(spec_array, f)
+    return dataset
+
+
+def process_bimodal_dali(config):
     # This step takes a bit of time
     print('Loading DALI')
     dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
@@ -340,7 +379,7 @@ def read4bimodal(dataset):
     lyrics_list = []
     mel_paths = []
     for v in dataset:
-        lyrics_list.append(normalize_string(v['lyrics']))
+        lyrics_list.append(v['lyrics'])
         mel_paths.append(v['spec_id'])
 
     pairs = list(zip(lyrics_list, mel_paths))

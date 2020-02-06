@@ -7,7 +7,7 @@ model_config = {
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
-    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
+    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
 
     # model-specific hyperparams
     'anneal_till': 350,  # for vae
@@ -79,8 +79,8 @@ model_config = {
     # 'spectrograms': '/home/d35kumar/Github/lyrics_generation/data/processed/spectrograms_split/'
     'dataset_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
     'dataset_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
-    'dataset_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/final_lyrics.txt',  # Path to load dali lyrics
-    'split_spec': '/collection/gsahu/ae/lyrics_generation/data/processed/spectrograms_split/',  # Path to load dali lyrics
+    'dataset_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/Lyrics_Data/complete_lyrics_2artists.txt',  # Path to load dali lyrics
+    'split_spec': '/collection/gsahu/ae/lyrics_generation/data/raw/Lyrics_Data/',  # Path to load dali lyrics
     # 'dali_path': '/home/gsahu/code/lyrics_generation/data/raw/DALI_v1.0/',
     # 'dali_audio': '/home/gsahu/code/lyrics_generation/data/raw/dali_audio/',  # Path to store dali audio files
 }
@@ -98,7 +98,7 @@ def get_dependent_params(model_config):
     model_config['vocab_path'] = '{}vocab.npy'.format(processed_path, m_code)
     model_config['filtered_emb_path'] = \
         '{}english_w2v_filtered.hd5'.format(processed_path)
-    model_config['classes'] = [-1, 1] if 'scorer' in m_code else \
+    model_config['classes'] = [0, 1] if 'scorer' in m_code else \
         list(range(len(model_config['filter_genre'])))
     model_config['save_dir'] += model_config['task'] + '/'
 

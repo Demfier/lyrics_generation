@@ -158,12 +158,6 @@ class BiModalScorer(nn.Module):
         for p in self.img_encoder.parameters():
             p.requires_grad = True
 
-        # We will concatenate img and lyrics features, so input size becomes
-        # ~25k (from vgg16) + 2*hidden_dim (from rnn)
-        self.final_in_features = \
-            self.img_encoder.classifier[0].in_features + \
-            self.pf*self.config['hidden_dim']
-
         self.img_encoder.classifier = nn.Sequential(
             nn.Linear(self.img_encoder.classifier[0].in_features, 512),
             nn.Linear(512, 128),
