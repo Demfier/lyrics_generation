@@ -165,7 +165,8 @@ class BiModalScorer(nn.Module):
 
         self.out = nn.Sequential(
             nn.Dropout(self.dropout),
-            nn.Linear(50 + self.pf*self.config['hidden_dim']), self.output_dim)
+            nn.Linear(50 + self.pf*self.config['hidden_dim'], self.output_dim)
+            )
 
     def pool(self, rnn_output):
         pool_func = F.avg_pool1d if self.avg_pool else F.max_pool1d

@@ -65,15 +65,15 @@ def process_bimodal(config):
             mel_path = '{}{}/Specs/{}'.format(config['split_spec'], artist, spec_id)
             if not os.path.exists(mel_path):  # skip if spec doesn't exist
                 continue
-            for l in get_subsequences(line):
+            for l in get_subsequences(lyrics):
                 sample = {}
+                sample['lyrics'] = l
                 sample['spec_id'] = spec_id
-                sample['lyrics'] = lyrics.strip()
                 sample['mel_path'] = mel_path
                 dataset.append(sample)
                 spec_array[spec_id] = read_spectrogram(mel_path)
         except ValueError as e:
-            print('skipping {}...due to value error'.format(line), end='')
+            print('skipping {}...due to value error'.format(lyrics), end='')
 
     print('Saving Mel Spec arrays...')
     with open('data/processed/{}/spec_array.pkl'.format(
