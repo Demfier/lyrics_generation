@@ -7,7 +7,7 @@ model_config = {
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
-    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
+    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
 
     # model-specific hyperparams
     'anneal_till': 500,  # for vae

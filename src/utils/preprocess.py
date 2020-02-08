@@ -55,17 +55,14 @@ def process_bimodal(config):
 
     # maintain a dict of artists and their spec ids to generate negative samples
     spec_ids_dict = {}
-    print('Making mel paths dict dict for artists')
+    print('Making mel paths dict for artists')
     for line in tqdm(lines):
         # eg: DepecheMode_waiting-for-the-night_0.png   I'm waiting for the night to fall
-        try:
-            spec_id, lyrics = line.split('\t')
-            artist = spec_id.split('_', 1)[0]
-            if artist not in spec_ids_dict:
-                spec_ids_dict[artist] = []
-            spec_ids_dict[artist].append(spec_id)
-        except ValueError as e:
-            print('skipping {}...due to value error'.format(lyrics), end='')
+        spec_id, lyrics = line.strip().split('\t')
+        artist = spec_id.split('_', 1)[0]
+        if artist not in spec_ids_dict:
+            spec_ids_dict[artist] = []
+        spec_ids_dict[artist].append(spec_id)
 
     artists_bucket = list(spec_ids_dict.keys())
 
@@ -100,6 +97,8 @@ def process_bimodal(config):
             sample['spec_id'] = spec_id
             mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
                                               artist, spec_id)
+            if not os.path.exists(mel_path):  # skip if spec doesn't exist
+                continue
             sample['mel_path'] = mel_path
             sample['label'] = 0
             dataset.append(sample)
@@ -424,7 +423,7 @@ def read4bimodal(dataset):
     for v in dataset:
         lyrics_list.append(v['lyrics'])
         spec_ids.append(v['spec_id'])
-        y.append(v['labels'])
+        y.append(v['label'])
     pairs = list(zip(lyrics_list, spec_ids))
     return pairs, torch.tensor(y).long()
 
