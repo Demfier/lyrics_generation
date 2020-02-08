@@ -54,7 +54,7 @@ def get_specs(n):
 
 
 def load_scorer_embeddings():
-    with h5py.File('data/processed/bimodal_scorer/english_w2v_filtered.hd5', 'r') as f:
+    with h5py.File('data/processed/vae/english_w2v_filtered.hd5', 'r') as f:
         return torch.from_numpy(np.array(f['data'])).float().to(conf['device'])
 
 
@@ -79,6 +79,7 @@ def main():
     model = model.to(device)
 
     with torch.no_grad():
+        model.eval()
         # print('\n### Random Sampling ###:\n')
         # random_sampled = translate(vocab, model._random_sample(9))
         # for s in random_sampled:

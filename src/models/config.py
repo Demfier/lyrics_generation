@@ -2,7 +2,7 @@ import os
 import torch
 model_config = {
     # hyperparameters
-    'lr': 1e-3,
+    'lr': 1e-4,
     'dropout': 0.3,
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
@@ -10,8 +10,8 @@ model_config = {
     'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
 
     # model-specific hyperparams
-    'anneal_till': 650,  # for vae
-    'x0': 5500,  # for vae
+    'anneal_till': 500,  # for vae
+    'x0': 4500,  # for vae
     'k': 5e-3,  # slope of the logistic annealing function (for vae)
     'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
     'sampling_temperature': 5e-3,  # z_temp to be used during inference
@@ -29,7 +29,7 @@ model_config = {
     'bidirectional': True,  # make the encoder bidirectional or not
     'attn_model': None,  # None/dot/concat/general
 
-    'latent_dim': 256,
+    'latent_dim': 100,
     'hidden_dim': 256,
     'embedding_dim': 300,
 
@@ -46,7 +46,7 @@ model_config = {
     # Counter({6: 215713, 5: 197313, 7: 183332, 4: 150900, 8: 147375, 9: 107612, 10: 78934, 3: 76527, 11: 51589, 12: 32846, 2: 27430, 13: 19102, 14: 11323, 1: 7100, 15: 6727, 16: 4049, 17: 1881, 18: 715, 19: 194, 20: 48, 21: 14, 22: 2, 23: 2, 0: 1, 24: 1, 25: 1})
 
     # run-time conf
-    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
@@ -57,8 +57,7 @@ model_config = {
 
     # DALI-specific
     'filter_lang': 'english',
-    'filter_genre': {'Pop', 'Rock', 'Alternative', 'Dance',
-                     'Metal', 'Country', 'Electro', 'R&B'},
+    'filter_genre': {'DepecheMode', 'NineInchNails'},
     'max_songs': 200,  # maximum songs to consider per genre
 
     'embedding_dim': 300,
@@ -68,7 +67,7 @@ model_config = {
     'generate_spectrograms': False,
     'pretrained_model': False,  # {'vae-1L-bilstm-11', False},
     'pretrained_scorer': False,  # {'bimodal_scorer-1L-bilstm-0', False}
-    # 'pretrained_model': 'vae-1L-bilstm-68',  # {'vae-1L-bilstm-11', False},
+    # 'pretrained_model': 'vae-1L-bilstm-2',  # {'vae-1L-bilstm-11', False},
     # 'pretrained_scorer': 'bimodal_scorer-1L-bilstm-0',  # {'bimodal_scorer-1L-bilstm-0', False}
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
@@ -93,6 +92,7 @@ def get_dependent_params(model_config):
         model_config['beam_size'] = 1
     m_code = model_config['model_code']
     processed_path = 'data/processed/{}/'.format(m_code)
+    # processed_path = 'data/processed/vae/'
     if not os.path.exists(processed_path):
         os.mkdir(processed_path)
     model_config['vocab_path'] = '{}vocab.npy'.format(processed_path, m_code)

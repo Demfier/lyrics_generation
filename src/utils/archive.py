@@ -47,79 +47,7 @@ def process_bimodal(config):
     """
     This step loads the lyrics data along with its spec file's name
     """
-    print('Loading bimodal dataset')
-    with open(config['dataset_lyrics']) as f:
-        lines = f.readlines()
-        np.random.shuffle(lines)
-    dataset = []
 
-    # maintain a dict of artists and their spec ids to generate negative samples
-    spec_ids_dict = {}
-    print('Making mel paths dict dict for artists')
-    for line in tqdm(lines):
-        # eg: DepecheMode_waiting-for-the-night_0.png   I'm waiting for the night to fall
-        try:
-            spec_id, lyrics = line.split('\t')
-            artist = spec_id.split('_', 1)[0]
-            if artist not in spec_ids_dict:
-                spec_ids_dict[artist] = []
-            spec_ids_dict[artist].append(spec_id)
-        except ValueError as e:
-            print('skipping {}...due to value error'.format(lyrics), end='')
-
-    artists_bucket = list(spec_ids_dict.keys())
-
-    spec_array = {}
-    print('Compiling actual dataset with positive and negative samples')
-    for line in tqdm(lines):
-        # eg: DepecheMode_waiting-for-the-night_0.png   I'm waiting for the night to fall
-        try:
-            spec_id, lyrics = line.split('\t')
-            artist = spec_id.split('_', 1)[0]
-            lyrics = normalize_string(
-                lyrics.translate(str.maketrans('', '', string.punctuation)))
-            mel_path = '{}{}/Specs/{}'.format(config['split_spec'], artist, spec_id)
-            if not os.path.exists(mel_path):  # skip if spec doesn't exist
-                continue
-
-            # Add a positive sample
-            sample = {}
-            sample['lyrics'] = lyrics
-            sample['spec_id'] = spec_id
-            sample['mel_path'] = mel_path
-            sample['label'] = 1
-            dataset.append(sample)
-            spec_array[spec_id] = read_spectrogram(mel_path)
-
-            # Add a negative sample
-            sample = {}
-            sample['lyrics'] = lyrics
-            # get the other artist (works as we have just two artists)
-            artist = artists_bucket[1-artists_bucket.index(artist)]
-            spec_id = np.random.choice(spec_ids_dict[artist])
-            sample['spec_id'] = spec_id
-            mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
-                                              artist, spec_id)
-            sample['mel_path'] = mel_path
-            sample['label'] = 0
-            dataset.append(sample)
-
-            # don't train on subsequences for now
-            # for l in get_subsequences(lyrics):
-            #     sample = {}
-            #     sample['lyrics'] = l
-            #     sample['spec_id'] = spec_id
-            #     sample['mel_path'] = mel_path
-            #     dataset.append(sample)
-            #     spec_array[spec_id] = read_spectrogram(mel_path)
-        except ValueError as e:
-            print('skipping {}...due to value error'.format(lyrics), end='')
-
-    print('Saving Mel Spec arrays...')
-    with open('data/processed/{}/spec_array.pkl'.format(
-            config['model_code']), 'wb') as f:
-        pickle.dump(spec_array, f)
-    return dataset
 
 
 def process_bimodal_dali(config):
@@ -414,19 +342,60 @@ def read4genre(dataset):
 
 def read4bimodal(dataset):
     """
-    dataset is a list of dictionaries with two fields, lyrics and spec_ids
-    and labels
+    dataset is a list of dictionaries with two fields, lyrics and mel_path
     """
-    np.random.shuffle(dataset)
-    y = []
-    spec_ids = []
     lyrics_list = []
+    mel_paths = []
     for v in dataset:
-        lyrics_list.append(v['lyrics'])
-        spec_ids.append(v['spec_id'])
-        y.append(v['labels'])
-    pairs = list(zip(lyrics_list, spec_ids))
+        lyrics_list.append(normalize_string(v['lyrics']))
+        mel_paths.append(v['spec_id'])
+
+    pairs = list(zip(lyrics_list, mel_paths))
+    y = [1] * len(pairs) + [0] * len(pairs)
+
+    # neg sampling
+    total_samples = len(dataset)
+    deltas = np.random.choice(np.arange(30, total_samples/2), total_samples)
+    lyrics_list = lyrics_list * 2
+    mel_paths_tmp = mel_paths  # make a copy as .append mutates
+    for idx in range(total_samples):
+        neg_idx = get_neg_idx(idx, total_samples-1, deltas[idx])
+        mel_paths.append(mel_paths_tmp[neg_idx])
+    pairs += list(zip(lyrics_list, mel_paths))
+
+    # Shuffle the entire dataset
+    data = list(zip(pairs, y))
+    np.random.shuffle(data)
+    pairs = []
+    y = []
+    for d in data:
+        pairs.append(d[0])
+        y.append(d[1])
     return pairs, torch.tensor(y).long()
+
+
+def get_neg_idx(idx, limit, delta=None):
+    """
+    given a lyrics id, add/subtract a delta (whose max value is limit/2)
+    from it to get the id of the negative sample mel_path. If the value
+    unflows 0, change neg_idx to 0+delta. If values overflows limit, change
+    neg_idx to limit - delta. After all this, if the difference between
+    neg_idx and original idx is less than 30, randomly add a number between
+    30 and 1000 to neg_idx
+    """
+    add = True if np.random.random() >= 0.5 else False
+    if delta is None:
+        delta = np.random.choice(np.arange(30, limit/2))
+    neg_idx = idx + delta if add else idx - delta
+
+    if neg_idx < 0:
+        neg_idx = delta
+    elif neg_idx > limit:
+        neg_idx = limit - delta
+
+    if np.abs(neg_idx - idx) < 30:
+        neg_idx = min(limit, idx + np.random.choice(1000))
+    return int(neg_idx)
 
 
 def read4bilstm(dataset):

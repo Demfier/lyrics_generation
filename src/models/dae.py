@@ -163,6 +163,7 @@ class AutoEncoder(nn.Module):
         TODO: Handle bidirectional decoders
         """
         max_y_len, bs = y.shape
+        # max_y_len = 6
         vocab_size = self.vocab.size
 
         if y_specs is not None:
@@ -219,6 +220,7 @@ class AutoEncoder(nn.Module):
             # output -> (beam_size*bs, vocab_size)
             # dec_hidden -> (beam_size*bs, hidden * self.pf)
             output, dec_hidden = self._decode_token(output, dec_hidden, mask)
+            # print(output.shape, decoder_outputs.shape, t)
             decoder_outputs[t] = output
             do_tf = random.random() < self.config['tf_ratio']
             if infer or (not do_tf):
