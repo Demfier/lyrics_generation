@@ -32,8 +32,8 @@ def process_raw(config):
         dataset = process_bimodal(config)
     elif config['model_code'] in {'dae', 'vae'}:
         dataset = process_ae(config)
-    elif config['model_code'] == 'clf':
-        dataset = process_clf(config)
+    elif config['model_code'] == 'lyrics_clf':
+        dataset = process_lyrics_clf(config)
     elif config['model_code'] == 'spec_clf':
         dataset = process_spec_clf(config)
 
@@ -154,6 +154,27 @@ def process_spec_clf(config):
     return dataset
 
 
+def process_lyrics_clf(config):
+    print('Loading lyrics file for lyrics clf.')
+    with open(config['dataset_lyrics']) as f:
+        lines = f.readlines()
+        np.random.shuffle(lines)
+
+    artists = config['label_names']
+    dataset = []
+    for line in tqdm(lines):
+        spec_id, lyrics = line.strip().split('\t')
+        lyrics = normalize_string(
+                lyrics.translate(str.maketrans('', '', string.punctuation)))
+        artist = spec_id.split('_', 1)[0]
+
+        sample = {}
+        sample['lyrics'] = lyrics
+        sample['label'] = artists.index(artist)
+        dataset.append(sample)
+    return dataset
+
+
 def process_ae(config):
     dataset = []
     print('Loading lyrics dataset at {}'.format(config['dataset_lyrics']))
@@ -218,7 +239,7 @@ def build_vocab(config):
     all_pairs = filter_pairs(all_pairs, config)
     vocab = Vocabulary()
     for pair_or_s in all_pairs:
-        if config['model_code'] in {'bimodal_scorer', 'clf'}:
+        if config['model_code'] in {'bimodal_scorer', 'lyrics_clf'}:
             # pair_or_s -> a sentence
             vocab.add_sentence(pair_or_s)
             continue
@@ -249,24 +270,19 @@ def read_pairs(config, mode='all'):
         return read4bimodal(dataset)
     elif config['model_code'] in {'dae', 'vae'}:
         return read4ae(dataset)
-    elif config['model_code'] == 'clf':
-        return read4genre(dataset)
+    elif config['model_code'] == 'lyrics_clf':
+        return read4lyricsclf(dataset)
     elif config['model_code'] == 'spec_clf':
         return read4specsclf(dataset)
 
 
-def read4genre(dataset):
-    lines = []
+def read4lyricsclf(dataset):
+    np.random.shuffle(dataset)
     y = []
+    lines = []
     for o in dataset:
         lines.append(normalize_string(o['lyrics']))
-        y.append(o['genre_id'])
-    x_y = list(zip(lines, y))
-    np.random.shuffle(x_y)
-    lines, y = [], []
-    for p, label in x_y:
-        lines.append(p)
-        y.append(label)
+        y.append(o['label'])
     return lines, torch.tensor(y).long()
 
 
@@ -365,7 +381,7 @@ def filter_pairs(pairs, config):
         # No need to return those big matrices
         return [' '.join(pair[0].split()[:max_len])
                 for pair in pairs if pair[0]]
-    elif config['model_code'] == 'clf':
+    elif config['model_code'] == 'lyrics_clf':
         return [' '.join(l.split()[:max_len])
                 for l in pairs if l]
     # for seq2seq-type models
@@ -495,7 +511,7 @@ def batch_to_model_compatible_data_spec_clf(pairs, device, spec_array):
     return {'mel_spec': mel_specs.to(device)}
 
 
-def batch_to_model_compatible_data_clf(vocab, lines, device):
+def batch_to_model_compatible_data_lyrics_clf(vocab, lines, device):
     """
     Returns padded source and target index sequences
     ==================
@@ -569,7 +585,7 @@ def _btmcd(vocab, pairs, config, *args):
         return batch_to_model_compatible_data_bimodal(vocab, pairs, config['device'], args[0])
     elif config['model_code'] in {'dae', 'vae'}:
         return batch_to_model_compatible_data_ae(vocab, pairs, config['device'])
-    elif config['model_code'] == 'clf':
-        return batch_to_model_compatible_data_clf(vocab, pairs, config['device'])
+    elif config['model_code'] == 'lyrics_clf':
+        return batch_to_model_compatible_data_lyrics_clf(vocab, pairs, config['device'])
     elif config['model_code'] == 'spec_clf':
         return batch_to_model_compatible_data_spec_clf(pairs, config['device'], args[0])

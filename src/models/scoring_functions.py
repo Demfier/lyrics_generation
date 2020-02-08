@@ -230,11 +230,11 @@ class SpecOnlyClassifier(nn.Module):
         return self.out(self.img_encoder(x['mel_spec']))
 
 
-class GenreClassifier(BiModalScorer):
+class LyricsOnlyClassifier(BiModalScorer):
     """docstring for GenreClassifier"""
     def __init__(self, config, embedding_wts):
-        super(GenreClassifier, self).__init__(config, embedding_wts)
-        self.output_dim = len(self.config['filter_genre'])
+        super(LyricsOnlyClassifier, self).__init__(config, embedding_wts)
+        self.output_dim = len(self.config['classes'])
         self.out = nn.Linear(self.config['hidden_dim'], self.output_dim)
 
         del self.w

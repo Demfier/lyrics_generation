@@ -15,7 +15,7 @@ from utils import preprocess, metrics
 from models.config import model_config as conf
 from models.scoring_functions import (RNNScorer,
                                       BiModalScorer,
-                                      GenreClassifier,
+                                      LyricsOnlyClassifier,
                                       SpecOnlyClassifier)
 
 
@@ -93,6 +93,7 @@ def main():
     else:
         vocab = load_vocabulary()
         embedding_wts = get_embedding_wts(vocab) if conf['use_embeddings?'] else None
+
     print('Building model..')
     if conf['model_code'] == 'bilstm_scorer':
         model = RNNScorer(conf, embedding_wts)
@@ -101,9 +102,9 @@ def main():
         print('Loading spec_array...')
         with open('data/processed/bimodal_scorer/spec_array.pkl', 'rb') as f:
             spec_array = pickle.load(f)
-    elif conf['model_code'] == 'clf':  # classifier
-        model = GenreClassifier(conf, embedding_wts)
-        print('Genres: {}'.format(', '.join(sorted(list(conf['filter_genre'])))))
+    elif conf['model_code'] == 'lyrics_clf':  # classifier
+        model = LyricsOnlyClassifier(conf, embedding_wts)
+        print('Artists: {}'.format(', '.join(sorted(list(conf['label_names'])))))
     elif conf['model_code'] == 'spec_clf':  # artist spec classifier
         model = SpecOnlyClassifier(conf)
         with open('data/processed/spec_clf/spec_array.pkl', 'rb') as f:
