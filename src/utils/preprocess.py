@@ -34,6 +34,8 @@ def process_raw(config):
         dataset = process_ae(config)
     elif config['model_code'] == 'clf':
         dataset = process_clf(config)
+    elif config['model_code'] == 'spec_clf':
+        dataset = process_spec_clf(config)
 
     save_path = 'data/processed/{}/combined_dataset.pkl'.format(
         config['model_code'])
@@ -121,168 +123,35 @@ def process_bimodal(config):
     return dataset
 
 
-def process_bimodal_dali(config):
-    # This step takes a bit of time
-    print('Loading DALI')
-    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
-                                               skip=[], keep=[])
-    print('Loading split dataset (lyrics.txt)')
-    with open(config['dali_lyrics']) as f:
-        line_specs = f.readlines()
-        np.random.shuffle(line_specs)
+def process_spec_clf(config):
+    print('Loading data file for spec clf.')
+    with open(config['dataset_lyrics']) as f:
+        lines = f.readlines()
+        np.random.shuffle(lines)
 
-    # list of dictionaries
+    artists = sorted(list(config['label_names']))
     dataset = []
     spec_array = {}
-    genre_count = {}
-    for entry in tqdm(line_specs):
-        try:
-            line, spec_path = entry.strip().split('\t')
-            f_id = spec_path.split('/')[-1].split('.')[0]
+    for line in tqdm(lines):
+        # eg: DepecheMode_waiting-for-the-night_0.png   I'm waiting for the night to fall
+        spec_id, _ = line.strip().split('\t')  # ignore lyrics
+        artist = spec_id.split('_', 1)[0]
+        mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
+                                          artist, spec_id)
+        if not os.path.exists(mel_path):  # skip if spec doesn't exist
+            continue
 
-            mel_path = '{}{}.png'.format(config['split_spec'], f_id)
-            if not os.path.exists(mel_path):  # skip if spec doesn't exist
-                continue
+        sample = {}
+        sample['spec_id'] = spec_id
+        sample['label'] = artists.index(artist)
+        dataset.append(sample)
+        spec_array[spec_id] = read_spectrogram(mel_path)
 
-            # extract genre of the song
-            # NOTE: Imp to do this at SONG level, not f_id
-            song_id = f_id.split('_')[0]
-            info = dali_data[song_id].info
-            genre = info['metadata']['genres'][0]
-            if genre not in genre_count:
-                genre_count[genre] = 0
-            genre_count[genre] += 1
-            # take only `max_songs` number of songs for a genre
-            if genre_count[genre] > config['max_songs']:
-                continue
-
-            for l in get_subsequences(line):
-                sample = {}
-                sample['spec_id'] = f_id
-                sample['lyrics'] = l.strip()
-                sample['mel_path'] = mel_path
-                dataset.append(sample)
-
-                spec_array[f_id] = read_spectrogram(mel_path)
-        except ValueError as e:
-            print('skipping {}...due to value error'.format(entry), end='')
-    print('subsequences per genre: {}'.format(genre_count))
     print('Saving Mel Spec arrays...')
     with open('data/processed/{}/spec_array.pkl'.format(
             config['model_code']), 'wb') as f:
         pickle.dump(spec_array, f)
     return dataset
-
-
-def process_lm(config):
-    """
-    This function creates a tsv file with lyrics and their corresponding genre
-    """
-    lm_data = ''
-    print('Loading DALI')
-    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
-                                               skip=[], keep=[])
-    file_ids = os.listdir(config['dali_path'])
-    genre_list = sorted(list(config['filter_genre']))
-    for f_id in file_ids:
-        if f_id in ['info', 'audio.zip']:
-            continue
-        # f_id is of the format id.gz. remove the gz part
-        f_id = f_id.split('.')[0]
-        annotations = dali_data[f_id].annotations
-        line_level = annotations['annot']['lines']
-        info = dali_data[f_id].info
-        if 'genres' not in info['metadata']:
-            continue
-        if info['metadata']['language'] != config['filter_lang']:
-            continue
-        genre = info['metadata']['genres']
-        if genre == []:
-            continue
-        genre = genre[0]
-        if genre not in genre_list:
-            continue
-        for l in line_level:
-            lm_data += '{}\t{}\t{}\n'.format(l['text'], genre, f_id)
-    with open('big_lyrics_info.txt', 'w') as f:
-        f.write(lm_data)
-
-
-def read_spectrogram_batch(spectrogram_paths):
-    # remove alpha dimension and resize to 224x224
-    return [skimage.transform.resize(s[:, :, :3], (224, 224, 3))
-            for s in skimage.io.imread_collection(spectrogram_paths)]
-
-
-def read_spectrogram(spectrogram_path):
-    # remove alpha dimension and resize to 224x224
-    return scipy.misc.imresize(
-        skimage.io.imread(spectrogram_path)[:, :, :3], (224, 224, 3)
-        )
-
-
-def process_bilstm(config):
-    # This step takes a bit of time
-    print('Loading DALI')
-    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
-                                               skip=[], keep=[])
-    dataset = []
-    file_ids = os.listdir(config['dali_path'])
-    for f_id in file_ids:
-        if f_id == 'info':
-            continue
-        # f_id is of the format id.gz. remove the gz part
-        f_id = f_id.split('.')[0]
-        # Get different level of annotations
-        annotations = dali_data[f_id].annotations
-        note_level = annotations['annot']['notes']
-        word_level = annotations['annot']['words']
-        line_level = annotations['annot']['lines']
-
-        sample = {}
-        line_id = 0
-        notes_seq = []
-        words_seq = []
-        for n in note_level:
-            note = freq2note(n['freq'][0])
-            if 'index' not in n or note < 0:
-                continue
-            word_id = n['index']
-            curr_line_id = word_level[word_id]['index']
-            if not notes_seq:
-                line_id = curr_line_id
-
-            if curr_line_id == line_id:
-                notes_seq.append(note)
-                words_seq.append(n['text'])
-            else:
-                sample['notes'] = notes_seq
-                for subseq in get_subsequences(line_level[line_id]['text']):
-                    sample['line'] = subseq.strip()
-                    dataset.append(sample)
-                line_id = curr_line_id
-                notes_seq = []
-                words_seq = []
-                sample = {}
-    return uniq_dictlist(dataset)
-
-
-def process_ae_dali(config):
-    dataset = []
-    print('Loading lyrics dataset at {}'.format(config['dataset_lyrics']))
-    with open(config['dataset_lyrics'], 'r') as f:
-        lyrics_info = f.readlines()
-    genre_count = {}
-    for l in lyrics_info:
-        line, genre, _ = l.split('\t')
-        if genre not in genre_count:
-            genre_count[genre] = 0
-        genre_count[genre] += 1
-        # take only `max_songs` number of songs for a genre
-        if genre_count[genre] > config['max_songs']:
-            continue
-        dataset.append(line)
-    return list(set(dataset))
 
 
 def process_ae(config):
@@ -301,33 +170,21 @@ def process_ae(config):
     return list(set(dataset))
 
 
-def process_clf(config):
-    dataset = []
-    print('Loading DALI')
-    dali_data = dali_code.get_the_DALI_dataset(config['dali_path'],
-                                               skip=[], keep=[])
-    print('Loading lyrics dataset')
-    with open(config['dali_lyrics'], 'r') as f:
-        lyrics_info = f.readlines()
-    genre_list = sorted(list(config['filter_genre']))
-    for l in lyrics_info:
-        line, spec_path = l.split('\t')
-        # spec_path of the form:
-        # {path_to_split_spectrograms}/8d2bea941a11497a984e50de3119b4d4_0.ogg
-        # below command splits by '/', keep the last element, then splits by
-        # '_' and keep the first element (to remove the line id and ext)
-        spec_id = spec_path.split('/')[-1].split('_')[0]
-        info = dali_data[spec_id].info
-        genre = info['metadata']['genres'][0]  # consider 1st as the major one
-        # Note: this line whould throw an error if genre is not present in
-        # genre_list but this shouldn't happen since the lyrics were filtered
-        # using the same config. In other words, it's like a sanity check.
-        genre_id = genre_list.index(genre)
-        sample = {'lyrics': normalize_string(line),
-                  'genre_id': genre_id,
-                  'genre': genre}
-        dataset.append(sample)
-    return dataset
+
+
+def read_spectrogram_batch(spectrogram_paths):
+    # remove alpha dimension and resize to 224x224
+    return [skimage.transform.resize(s[:, :, :3], (224, 224, 3))
+            for s in skimage.io.imread_collection(spectrogram_paths)]
+
+
+def read_spectrogram(spectrogram_path):
+    # remove alpha dimension and resize to 224x224
+    return scipy.misc.imresize(
+        skimage.io.imread(spectrogram_path)[:, :, :3], (224, 224, 3)
+        )
+
+
 
 
 def get_subsequences(line):
@@ -394,6 +251,8 @@ def read_pairs(config, mode='all'):
         return read4ae(dataset)
     elif config['model_code'] == 'clf':
         return read4genre(dataset)
+    elif config['model_code'] == 'spec_clf':
+        return read4specsclf(dataset)
 
 
 def read4genre(dataset):
@@ -426,6 +285,17 @@ def read4bimodal(dataset):
         y.append(v['label'])
     pairs = list(zip(lyrics_list, spec_ids))
     return pairs, torch.tensor(y).long()
+
+
+def read4specsclf(dataset):
+    """dataset is a dict with two keys, spec_id and label"""
+    np.random.shuffle(dataset)
+    y = []
+    spec_ids = []
+    for v in dataset:
+        spec_ids.append(v['spec_id'])
+        y.append(v['label'])
+    return spec_ids, torch.tensor(y).long()
 
 
 def read4bilstm(dataset):
@@ -617,6 +487,14 @@ def batch_to_model_compatible_data_bimodal(vocab, pairs, device, spec_array):
         }
 
 
+def batch_to_model_compatible_data_spec_clf(pairs, device, spec_array):
+    mel_specs = [spec_array[spec_id] for spec_id in pairs]
+    # make (bs, num_channels, w, h) as vgg accepts image in this format
+    mel_specs = \
+        torch.tensor(mel_specs).float().permute(0, 3, 1, 2).contiguous()
+    return {'mel_spec': mel_specs.to(device)}
+
+
 def batch_to_model_compatible_data_clf(vocab, lines, device):
     """
     Returns padded source and target index sequences
@@ -693,3 +571,5 @@ def _btmcd(vocab, pairs, config, *args):
         return batch_to_model_compatible_data_ae(vocab, pairs, config['device'])
     elif config['model_code'] == 'clf':
         return batch_to_model_compatible_data_clf(vocab, pairs, config['device'])
+    elif config['model_code'] == 'spec_clf':
+        return batch_to_model_compatible_data_spec_clf(pairs, config['device'], args[0])

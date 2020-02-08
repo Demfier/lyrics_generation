@@ -13,7 +13,10 @@ from tensorboardX import SummaryWriter
 
 from utils import preprocess, metrics
 from models.config import model_config as conf
-from models.scoring_functions import RNNScorer, BiModalScorer, GenreClassifier
+from models.scoring_functions import (RNNScorer,
+                                      BiModalScorer,
+                                      GenreClassifier,
+                                      SpecOnlyClassifier)
 
 
 def load_vocabulary():
@@ -64,7 +67,6 @@ def main():
     # Initialize tensorboardX writer
     writer = SummaryWriter()
 
-    vocab = load_vocabulary()
     pprint(conf)
     print('Loading train, validation and test pairs.')
     train_pairs, y_train = preprocess.read_pairs(conf, mode='train')
@@ -85,7 +87,12 @@ def main():
     n_val = len(val_pairs)
     n_test = len(test_pairs)
     device = conf['device']
-    embedding_wts = get_embedding_wts(vocab) if conf['use_embeddings?'] else None
+
+    if conf['model_code'] == 'spec_clf':
+        vocab = None
+    else:
+        vocab = load_vocabulary()
+        embedding_wts = get_embedding_wts(vocab) if conf['use_embeddings?'] else None
     print('Building model..')
     if conf['model_code'] == 'bilstm_scorer':
         model = RNNScorer(conf, embedding_wts)
@@ -97,6 +104,11 @@ def main():
     elif conf['model_code'] == 'clf':  # classifier
         model = GenreClassifier(conf, embedding_wts)
         print('Genres: {}'.format(', '.join(sorted(list(conf['filter_genre'])))))
+    elif conf['model_code'] == 'spec_clf':  # artist spec classifier
+        model = SpecOnlyClassifier(conf)
+        with open('data/processed/spec_clf/spec_array.pkl', 'rb') as f:
+            spec_array = pickle.load(f)
+        print('Artists: {}'.format(', '.join(sorted(list(conf['label_names'])))))
     model = model.to(device)
     criterion = nn.CrossEntropyLoss(reduction='sum')  # to train genre classifier
     optimizer = optim.Adam(model.parameters(), lr=conf['lr'])
@@ -127,7 +139,7 @@ def main():
             iter_pairs = train_pairs[iter: iter + conf['batch_size']]
             if len(iter_pairs) == 0:  # handle the strange error
                 continue
-            if conf['model_code'] == 'bimodal_scorer':
+            if conf['model_code'] in ['bimodal_scorer', 'spec_clf']:
                 x_train = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
             else:
                 x_train = preprocess._btmcd(vocab, iter_pairs, conf)
@@ -153,7 +165,7 @@ def main():
             actual = y_val.cpu().numpy()
             for iter in tqdm(range(0, n_val, conf['batch_size'])):
                 iter_pairs = val_pairs[iter: iter + conf['batch_size']]
-                if conf['model_code'] == 'bimodal_scorer':
+                if conf['model_code'] in ['bimodal_scorer', 'spec_clf']:
                     x_val = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
                 else:
                     x_val = preprocess._btmcd(vocab, iter_pairs, conf)
@@ -186,7 +198,7 @@ def main():
                 actual = y_test.cpu().numpy()
                 for iter in range(0, n_test, conf['batch_size']):
                     iter_pairs = test_pairs[iter: iter + conf['batch_size']]
-                    if conf['model_code'] == 'bimodal_scorer':
+                    if conf['model_code'] in ['bimodal_scorer', 'spec_clf']:
                         x_test = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
                     else:
                         x_test = preprocess._btmcd(vocab, iter_pairs, conf)

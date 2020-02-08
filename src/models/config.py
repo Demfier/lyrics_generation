@@ -7,7 +7,7 @@ model_config = {
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
-    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
+    'model_code': 'spec_clf',  # bimodal_scorer/bilstm_scorer/dae/vae/clf
 
     # model-specific hyperparams
     'anneal_till': 500,  # for vae
@@ -46,7 +46,7 @@ model_config = {
     # Counter({6: 215713, 5: 197313, 7: 183332, 4: 150900, 8: 147375, 9: 107612, 10: 78934, 3: 76527, 11: 51589, 12: 32846, 2: 27430, 13: 19102, 14: 11323, 1: 7100, 15: 6727, 16: 4049, 17: 1881, 18: 715, 19: 194, 20: 48, 21: 14, 22: 2, 23: 2, 0: 1, 24: 1, 25: 1})
 
     # run-time conf
-    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,  # half lr every 3 non-improving batches
@@ -57,7 +57,7 @@ model_config = {
 
     # DALI-specific
     'filter_lang': 'english',
-    'filter_genre': {'DepecheMode', 'NineInchNails'},
+    'label_names': {'DepecheMode', 'NineInchNails'},
     'max_songs': 200,  # maximum songs to consider per genre
 
     'embedding_dim': 300,
@@ -99,7 +99,7 @@ def get_dependent_params(model_config):
     model_config['filtered_emb_path'] = \
         '{}english_w2v_filtered.hd5'.format(processed_path)
     model_config['classes'] = [0, 1] if 'scorer' in m_code else \
-        list(range(len(model_config['filter_genre'])))
+        list(range(len(model_config['label_names'])))
     model_config['save_dir'] += model_config['task'] + '/'
 
 

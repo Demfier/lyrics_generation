@@ -200,6 +200,36 @@ class BiModalScorer(nn.Module):
         return self.out(self.fusion(music_features, lyrics_pool))
 
 
+class SpecOnlyClassifier(nn.Module):
+    """docstring for SpecOnlyClassifier"""
+    def __init__(self, config):
+        super(SpecOnlyClassifier, self).__init__()
+        self.config = config
+        self.dropout = config['dropout']
+        self.output_dim = len(config['classes'])  # set of artists
+
+        self.img_encoder = vgg16(pretrained=True)
+        # Keep VGG trainable
+        for p in self.img_encoder.parameters():
+            p.requires_grad = True
+
+        self.img_encoder.classifier = nn.Sequential(
+            nn.Linear(self.img_encoder.classifier[0].in_features, 512),
+            nn.Linear(512, 128),
+            nn.Linear(128, 50))
+
+        self.out = nn.Sequential(
+            nn.Dropout(self.dropout),
+            nn.Linear(50, self.output_dim)
+            )
+
+    def forward(self, x):
+        """
+        x is a dict containing just mel_spec
+        """
+        return self.out(self.img_encoder(x['mel_spec']))
+
+
 class GenreClassifier(BiModalScorer):
     """docstring for GenreClassifier"""
     def __init__(self, config, embedding_wts):
@@ -207,8 +237,8 @@ class GenreClassifier(BiModalScorer):
         self.output_dim = len(self.config['filter_genre'])
         self.out = nn.Linear(self.config['hidden_dim'], self.output_dim)
 
-        del self.img_encoder
         del self.w
+        del self.img_encoder
 
     def attn(self, rnn_output, final_hidden):
         """
