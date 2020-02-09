@@ -82,37 +82,31 @@ def process_bimodal(config):
                 continue
 
             # Add a positive sample
-            sample = {}
-            sample['lyrics'] = lyrics
-            sample['spec_id'] = spec_id
-            sample['mel_path'] = mel_path
-            sample['label'] = 1
-            dataset.append(sample)
             spec_array[spec_id] = read_spectrogram(mel_path)
+            subsequences = get_subsequences(lyrics)
+            for l in subsequences:
+                sample = {}
+                sample['lyrics'] = l
+                sample['spec_id'] = spec_id
+                sample['mel_path'] = mel_path
+                sample['label'] = 1
+                dataset.append(sample)
 
             # Add a negative sample
-            sample = {}
-            sample['lyrics'] = lyrics
             # get the other artist (works as we have just two artists)
             artist = artists_bucket[1-artists_bucket.index(artist)]
             spec_id = np.random.choice(spec_ids_dict[artist])
-            sample['spec_id'] = spec_id
             mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
                                               artist, spec_id)
             if not os.path.exists(mel_path):  # skip if spec doesn't exist
                 continue
-            sample['mel_path'] = mel_path
-            sample['label'] = 0
-            dataset.append(sample)
-
-            # don't train on subsequences for now
-            # for l in get_subsequences(lyrics):
-            #     sample = {}
-            #     sample['lyrics'] = l
-            #     sample['spec_id'] = spec_id
-            #     sample['mel_path'] = mel_path
-            #     dataset.append(sample)
-            #     spec_array[spec_id] = read_spectrogram(mel_path)
+            for l in subsequences:
+                sample = {}
+                sample['lyrics'] = lyrics
+                sample['spec_id'] = spec_id
+                sample['mel_path'] = mel_path
+                sample['label'] = 0
+                dataset.append(sample)
         except ValueError as e:
             print('skipping {}...due to value error'.format(lyrics), end='')
 
