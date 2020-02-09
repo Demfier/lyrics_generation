@@ -165,12 +165,42 @@ class BiModalScorer(nn.Module):
 
         self.out = nn.Sequential(
             nn.Dropout(self.dropout),
-            nn.Linear(50 + self.pf*self.config['hidden_dim'], self.output_dim)
+            nn.Linear(50 + self.config['hidden_dim'], self.output_dim)
             )
 
     def pool(self, rnn_output):
         pool_func = F.avg_pool1d if self.avg_pool else F.max_pool1d
         return pool_func(rnn_output, rnn_output.size(2)).squeeze(2)
+
+    def attn(self, rnn_output, final_hidden):
+        """
+        Returns `attended` hidden state given an rnn_output and its final
+        hidden state
+
+        attn: torch.Tensor, torch.Tensor -> torch.Tensor
+        requires:
+            rnn_output.shape => batch_size x max_seq_len x hidden_dim
+            final_hidden.shape => batch_size x hidden_dim
+        """
+        # Do this to sum the bidirectional outputs
+        rnn_output = (rnn_output[:, :, :self.config['hidden_dim']] +
+                      rnn_output[:, :, self.config['hidden_dim']:])
+        rnn_output = rnn_output.permute(1, 0, 2).contiguous()
+
+        final_hidden = final_hidden.view(self.config['n_layers'], 2,
+                                         self.bs, self.config['hidden_dim'])[-1]
+        # sum (pool) forward and backward hidden states
+        final_hidden = (final_hidden[0, :, :self.config['hidden_dim']] +
+                        final_hidden[1, :, :self.config['hidden_dim']])
+
+        attn_wts = torch.bmm(rnn_output, final_hidden.unsqueeze(2)).squeeze(2)
+        soft_attn_wts = F.softmax(attn_wts, dim=1)  # bs x num_t
+        # In the next step, rnn_output.shape changes as follows:
+        # (bs x num_t x hidden_dim) => (bs x hidden_dim x num_t)
+        # Finally, we get new_hidden of shape: (bs x hidden_dim)
+        new_hidden = torch.bmm(rnn_output.transpose(1, 2),
+                               soft_attn_wts.unsqueeze(2)).squeeze(2)
+        return new_hidden
 
     def fusion(self, music, lyrics):
         return torch.cat((music, lyrics), dim=-1)
@@ -186,6 +216,7 @@ class BiModalScorer(nn.Module):
         # music_melspec -> batch_size, num_channels, width, height (bs, 3, 224, 224) when
         # use_melfeats? is False else (batch_size, 1000)
         music_melspec = x['mel_spec']
+        _, self.bs = x['lyrics_seq'].shape
         # max_sequence_length, batch_size, embedding_dim
         lyrics_embeddings = self.embedding(x['lyrics_seq'])
         if self.config['use_melfeats?']:
@@ -195,9 +226,11 @@ class BiModalScorer(nn.Module):
             music_features = self.img_encoder(music_melspec)
 
         lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
-        lyrics_pool = self.pool(lyrics_output.permute(1, 2, 0))
+        # lyrics_pool = self.pool(lyrics_output.permute(1, 2, 0))
+
+        lyrics_attended = self.attn(lyrics_output, lyrics_hidden)
         # bs, output_dim
-        return self.out(self.fusion(music_features, lyrics_pool))
+        return self.out(self.fusion(music_features, lyrics_attended))
 
 
 class SpecOnlyClassifier(nn.Module):
@@ -240,39 +273,9 @@ class LyricsOnlyClassifier(BiModalScorer):
         del self.w
         del self.img_encoder
 
-    def attn(self, rnn_output, final_hidden):
-        """
-        Returns `attended` hidden state given an rnn_output and its final
-        hidden state
-
-        attn: torch.Tensor, torch.Tensor -> torch.Tensor
-        requires:
-            rnn_output.shape => batch_size x max_seq_len x hidden_dim
-            final_hidden.shape => batch_size x hidden_dim
-        """
-        attn_wts = torch.bmm(rnn_output, final_hidden.unsqueeze(2)).squeeze(2)
-        soft_attn_wts = F.softmax(attn_wts, dim=1)  # bs x num_t
-        # In the next step, rnn_output.shape changes as follows:
-        # (bs x num_t x hidden_dim) => (bs x hidden_dim x num_t)
-        # Finally, we get new_hidden of shape: (bs x hidden_dim)
-        new_hidden = torch.bmm(rnn_output.transpose(1, 2),
-                               soft_attn_wts.unsqueeze(2)).squeeze(2)
-        return new_hidden
-
     def forward(self, x):
-        _, bs = x['lyrics_seq'].shape
+        _, self.bs = x['lyrics_seq'].shape
         lyrics_embeddings = self.embedding(x['lyrics_seq'])
         lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
-        # Do this to sum the bidirectional outputs
-        lyrics_output = (lyrics_output[:, :, :self.config['hidden_dim']] +
-                         lyrics_output[:, :, self.config['hidden_dim']:])
-        lyrics_output = lyrics_output.permute(1, 0, 2).contiguous()
-
-        lyrics_hidden = lyrics_hidden.view(self.config['n_layers'], 2,
-                                           bs, self.config['hidden_dim'])[-1]
-        # sum (pool) forward and backward hidden states
-        lyrics_hidden = (lyrics_hidden[0, :, :self.config['hidden_dim']] +
-                         lyrics_hidden[1, :, :self.config['hidden_dim']])
-
         attended_ouptut = self.attn(lyrics_output, lyrics_hidden)
         return self.out(attended_ouptut)

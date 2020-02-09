@@ -52,7 +52,7 @@ def get_embedding_wts(vocab):
 
 def save_snapshot(model, epoch_num):
     if not os.path.exists(conf['save_dir']):
-        os.mkdirs(conf['save_dir'])
+        os.mkdir(conf['save_dir'])
     torch.save({
         'model': model.state_dict(),
         'epoch': epoch_num

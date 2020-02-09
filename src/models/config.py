@@ -6,7 +6,7 @@ model_config = {
     'dropout': 0.3,
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
-    'task': 'rec',  # mt/dialog/rec/dialog-rec
+    'task': 'scoring_function_attn',  # mt/dialog/rec/dialog-rec
     'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/lyrics_clf/spec_clf
 
     # model-specific hyperparams
