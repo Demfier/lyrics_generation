@@ -38,12 +38,12 @@ def load_vocabulary():
 
 
 def get_embedding_wts(vocab):
-    if conf['first_run?']:
-        print('First run: GENERATING filtered embeddings...')
-        embedding_wts = preprocess.generate_word_embeddings(vocab, conf)
-    else:
+    if os.path.exists(conf['filtered_emb_path']):
         print('LOADING filtered embeddings.')
         embedding_wts = preprocess.load_word_embeddings(conf)
+    else:  # load if it already exists
+        print('GENERATING filtered embeddings...')
+        embedding_wts = preprocess.generate_word_embeddings(vocab, conf)
     return embedding_wts.to(conf['device'])
 
 

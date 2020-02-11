@@ -185,8 +185,6 @@ def process_ae(config):
     return list(set(dataset))
 
 
-
-
 def read_spectrogram_batch(spectrogram_paths):
     # remove alpha dimension and resize to 224x224
     return [skimage.transform.resize(s[:, :, :3], (224, 224, 3))
@@ -198,8 +196,6 @@ def read_spectrogram(spectrogram_path):
     return scipy.misc.imresize(
         skimage.io.imread(spectrogram_path)[:, :, :3], (224, 224, 3)
         )
-
-
 
 
 def get_subsequences(line):

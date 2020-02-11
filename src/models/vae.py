@@ -47,7 +47,6 @@ class VariationalAutoEncoder(dae.AutoEncoder):
                                  self.pf, bs, self.hidden_dim)
             hidden = hidden[:, 0, :, :] + hidden[:, 1, :, :]
         # outputs => (max_seq_len x bs x hidden_dim * self.pf)
-        # hidden => (#enc_layers, bs, hidden * self.pf)
         return {
                 'encoder_outputs': outputs,
                 'mu': self.z_mu(hidden),

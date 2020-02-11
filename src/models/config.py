@@ -1,21 +1,39 @@
+"""
+Some metadata for the new artists lyrics dataset (full)
+avg. sentence length = 6.8
+max sentence length = 25
+sentence length v/s frequency:
+Counter({6: 215713, 5: 197313, 7: 183332, 4: 150900,
+         8: 147375, 9: 107612, 10: 78934, 3: 76527,
+         11: 51589, 12: 32846, 2: 27430, 13: 19102,
+         14: 11323, 1: 7100, 15: 6727, 16: 4049,
+         17: 1881, 18: 715, 19: 194, 20: 48,
+         21: 14, 22: 2, 23: 2, 0: 1, 24: 1, 25: 1})
+
+
+Some metadata for the 7 artiss lyrics dataset (7 artists only)
+avg. sentence length = 5.49
+max sentence length = 24
+99.8 percentile = 15
+sentence length v/s frequency:
+Counter({5: 6409, 4: 5914, 6: 5637, 3: 4231, 7: 3851,
+         8: 2336, 2: 1797, 9: 1419, 10: 959, 1: 855,
+         11: 601, 12: 329, 13: 187, 14: 110, 15: 62,
+         0: 61, 16: 27, 17: 17, 18: 5, 24: 2, 19: 1,
+         23: 1})
+"""
+
+
 import os
 import torch
 model_config = {
     # hyperparameters
-    'lr': 1e-5,
+    'lr': 5e-3,
     'dropout': 0.3,
     'patience': 3,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
-    'task': 'scoring_function_attn',  # mt/dialog/rec/dialog-rec
-    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/lyrics_clf/spec_clf
-
-    # model-specific hyperparams
-    'anneal_till': 500,  # for vae
-    'x0': 4500,  # for vae
-    'k': 5e-3,  # slope of the logistic annealing function (for vae)
-    'anneal_type': 'tanh',  # for vae {tanh, logistic, linear}
-    'sampling_temperature': 5e-3,  # z_temp to be used during inference
-    'scorer_temp': 0.4,
+    'task': 'rec',  # mt/dialog/rec/dialog-rec
+    'model_code': 'dae',  # bimodal_scorer/bilstm_scorer/dae/vae/lyrics_clf/spec_clf
 
     'clip': 50.0,  # values above which to clip the gradients
     'tf_ratio': 1.0,  # teacher forcing ratio
@@ -29,7 +47,6 @@ model_config = {
     'bidirectional': True,  # make the encoder bidirectional or not
     'attn_model': None,  # None/dot/concat/general
 
-    'latent_dim': 100,
     'hidden_dim': 256,
     'embedding_dim': 300,
 
@@ -38,12 +55,7 @@ model_config = {
     'SOS_TOKEN': 1,
     'EOS_TOKEN': 2,
     'UNK_TOKEN': 3,
-    'MAX_LENGTH': 25,  # Max length of a sentence
-    # Some metadata for the new lyrics dataset
-    # avg. sentence length = 6.8
-    # max sentence length = 25
-    # sentence length v/s frequency:
-    # Counter({6: 215713, 5: 197313, 7: 183332, 4: 150900, 8: 147375, 9: 107612, 10: 78934, 3: 76527, 11: 51589, 12: 32846, 2: 27430, 13: 19102, 14: 11323, 1: 7100, 15: 6727, 16: 4049, 17: 1881, 18: 715, 19: 194, 20: 48, 21: 14, 22: 2, 23: 2, 0: 1, 24: 1, 25: 1})
+    'MAX_LENGTH': 15,  # Max length of a sentence
 
     # run-time conf
     'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
@@ -78,7 +90,7 @@ model_config = {
     # 'spectrograms': '/home/d35kumar/Github/lyrics_generation/data/processed/spectrograms_split/'
     'dataset_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
     'dataset_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
-    'dataset_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/Lyrics_Data/complete_lyrics_2artists.txt',  # Path to load dali lyrics
+    'dataset_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/lyrics_7artists.txt',  # Path to load dali lyrics
     'split_spec': '/collection/gsahu/ae/lyrics_generation/data/raw/Lyrics_Data/',  # Path to load dali lyrics
     # 'dali_path': '/home/gsahu/code/lyrics_generation/data/raw/DALI_v1.0/',
     # 'dali_audio': '/home/gsahu/code/lyrics_generation/data/raw/dali_audio/',  # Path to store dali audio files
@@ -95,9 +107,29 @@ def get_dependent_params(model_config):
     # processed_path = 'data/processed/vae/'
     if not os.path.exists(processed_path):
         os.mkdir(processed_path)
-    model_config['vocab_path'] = '{}vocab.npy'.format(processed_path, m_code)
-    model_config['filtered_emb_path'] = \
-        '{}english_w2v_filtered.hd5'.format(processed_path)
+
+    # use vae's vocab when training the scoring function
+    if m_code == 'bimodal_scorer':
+        model_config['vocab_path'] = 'data/processed/vae/vocab.npy'
+    else:
+        model_config['vocab_path'] = '{}vocab.npy'.format(processed_path, m_code)
+
+    # VAE hyperparameters
+    if m_code == 'vae':
+        # model-specific hyperparams
+        model_config['latent_dim'] = 100
+        model_config['anneal_till'] = 500
+        model_config['x0'] = 4500
+        model_config['k'] = 5e-3  # slope of the logistic annealing function (for vae)
+        model_config['anneal_type'] = 'tanh'  # for vae {tanh, logistic, linear}
+        model_config['sampling_temperature'] = 5e-3  # z_temp to be used during inference
+        model_config['scorer_temp'] = 0.4
+    elif m_code == 'dae':
+        # there is no latent space in a dae!
+        model_config['latent_dim'] = model_config['hidden_dim']
+
+    # word-embeddings are common should be common for all types of models
+    model_config['filtered_emb_path'] = 'data/processed/english_w2v_filtered.hd5'
     model_config['classes'] = [0, 1] if 'scorer' in m_code else \
         list(range(len(model_config['label_names'])))
     model_config['save_dir'] += model_config['task'] + '/'

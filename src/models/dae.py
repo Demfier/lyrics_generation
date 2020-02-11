@@ -131,8 +131,6 @@ class AutoEncoder(nn.Module):
         # outputs => (max_seq_len, bs, hidden_dim * self.pf)
         # h_n (& c_n) => (#layers * self.pf, bs, hidden_dim)
         outputs, hidden = self.encoder(packed)
-        if self.unit == 'lstm':
-            hidden = hidden[1]  # ignore h_n
 
         # outputs => (max_seq_len x bs x hidden_dim * self.pf)
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
@@ -142,10 +140,21 @@ class AutoEncoder(nn.Module):
             # concatenate forward and backward encoder outputs
             outputs = outputs[:, :, 0, :] + outputs[:, :, 1, :]
 
-            # sum forward and backward hidden states
-            hidden = hidden.view(self.config['enc_n_layers'],
-                                 self.pf, bs, self.hidden_dim)
-            hidden = hidden[:, 0, :, :] + hidden[:, 1, :, :]
+            if self.unit == 'lstm':
+                # sum forward and backward hidden states
+                c_n = hidden[0].view(self.config['enc_n_layers'],
+                                     self.pf, bs, self.hidden_dim)
+                c_n = c_n[:, 0, :, :] + c_n[:, 1, :, :]
+
+                h_n = hidden[1].view(self.config['enc_n_layers'],
+                                     self.pf, bs, self.hidden_dim)
+                h_n = h_n[:, 0, :, :] + h_n[:, 1, :, :]
+                hidden = (c_n, h_n)
+            else:
+                # sum forward and backward hidden states
+                hidden = hidden.view(self.config['enc_n_layers'],
+                                     self.pf, bs, self.hidden_dim)
+                hidden = hidden[:, 0, :, :] + hidden[:, 1, :, :]
         # outputs => (max_seq_len x bs x hidden_dim * self.pf)
         # hidden => (#enc_layers, bs, hidden * self.pf)
         return {'encoder_outputs': outputs, 'z': hidden}
@@ -191,20 +200,25 @@ class AutoEncoder(nn.Module):
         # if #dec_layers > #enc_layers, use currently obtained hidden
         #  to represent the last #enc_layers layers of decoder hidden
         if self.config['dec_n_layers'] > self.config['enc_n_layers']:
-            dec_hidden = torch.zeros(self.config['dec_n_layers'], bs,
-                                     self.latent_dim).to(self.device)
-            dec_hidden[-self.config['enc_n_layers']:, :, :] = z
+            raise \
+                NotImplementedError("(dec_n_layers > enc_n_layers) Decoder" +
+                                    "can't have more layers than the encoder")
         else:
-            dec_hidden = z[-self.config['dec_n_layers']:, :, :]
+            if self.unit == 'lstm':
+                dec_hidden = (
+                    z[0][-self.config['dec_n_layers']:, :, :],
+                    z[1][-self.config['dec_n_layers']:, :, :]
+                    )
+                # doesn't make a different for beam_size = 1
+                dec_hidden = (
+                    dec_hidden[0].repeat(1, self.beam_size, 1),
+                    dec_hidden[1].repeat(1, self.beam_size, 1)
+                    )
+            else:
+                dec_hidden = z[-self.config['dec_n_layers']:, :, :]
+                dec_hidden = dec_hidden.repeat(1, self.beam_size, 1)
 
-        if self.unit == 'lstm':
-            # consider h_n = 0 for lstm
-            h_n = torch.zeros(self.config['dec_n_layers'], bs*self.beam_size,
-                              self.latent_dim).to(self.device)
-            # doesn't make a different for beam_size = 1
-            dec_hidden = dec_hidden.repeat(1, self.beam_size, 1)
             # dec_hidden => (#dec_layers, bs*beam_size, latent_dim)
-            dec_hidden = (h_n, dec_hidden)
 
         # initial decoder input is <sos> token
         # ouptut -> (bs)
