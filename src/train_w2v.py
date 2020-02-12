@@ -1,5 +1,6 @@
 import gensim
 import pickle
+from models.config import model_config as config
 
 
 class Dataset(object):
@@ -27,4 +28,4 @@ def main(file_path):
 
 
 if __name__ == '__main__':
-    main('data/processed/vae/combined_dataset.pkl')
+    main('data/processed/{}/combined_dataset.pkl'.format(config['model_code']))

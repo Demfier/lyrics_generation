@@ -29,9 +29,11 @@ class AutoEncoder(nn.Module):
         self.enc_dropout = nn.Dropout(self.config['dropout'])
         self.dec_dropout = nn.Dropout(self.config['dropout'])
 
-        self.embedding = nn.Embedding.from_pretrained(self.embedding_wts) \
-            if self.config['use_embeddings?'] else \
-            nn.Embedding(self.vocab.size, self.embedding_dim)
+        if self.config['use_embeddings?']:
+            self.embedding = nn.Embedding.from_pretrained(
+                self.embedding_wts, freeze=self.config['freeze_embeddings?'])
+        else:
+            self.embedding = nn.Embedding(self.vocab.size, self.embedding_dim)
 
         if self.unit == 'lstm':
             self.encoder = nn.LSTM(self.embedding_dim, self.hidden_dim,
@@ -66,11 +68,9 @@ class AutoEncoder(nn.Module):
                                       self.vocab.size)
 
         self.optimizer = optim.Adam(self.parameters(), self.config['lr'])
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer,
-                                                              mode='min',
-                                                              factor=0.1,
-                                                              patience=2,
-                                                              min_lr=self.config['min_lr'])
+        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer,
+                                                   step_size=15,
+                                                   gamma=0.5)
         # Reconstruction loss
         self.rec_loss = nn.CrossEntropyLoss(ignore_index=self.pad_idx)
 

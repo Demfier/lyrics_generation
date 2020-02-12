@@ -197,7 +197,7 @@ def main():
                 val_iter += 1
             print('Mean Validation Loss: {}\n{}\nSamples:\n'.format(
                 np.mean(epoch_loss), '-'*30))
-            # model.scheduler.step()
+            model.scheduler.step()
             # Sample some val sentences randomly
             for sample_id in random.sample(list(range(len(val_pairs))), 3):
                 print('I: {}\nG: {}\nA: {}\n'.format(

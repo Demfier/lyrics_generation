@@ -28,9 +28,9 @@ import os
 import torch
 model_config = {
     # hyperparameters
-    'lr': 5e-3,
+    'lr': 1e-3,
     'dropout': 0.3,
-    'patience': 3,  # number of epochs to wait before decreasing lr
+    'patience': 0,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
     'model_code': 'dae',  # bimodal_scorer/bilstm_scorer/dae/vae/lyrics_clf/spec_clf
@@ -58,11 +58,12 @@ model_config = {
     'MAX_LENGTH': 15,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
-    'use_scheduler': True,  # half lr every 3 non-improving batches
+    'use_scheduler': True,
     'use_embeddings?': True,  # use word embeddings or not
+    'freeze_embeddings?': False,  # keep word embeddings trainable or not
     'first_run?': True,  # True for the very first run
     'min_freq': 2,  # min frequency for the word to be a part of the vocab
     'n_layers': 1,
