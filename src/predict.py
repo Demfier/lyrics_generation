@@ -54,7 +54,7 @@ def get_specs(n):
 
 
 def load_scorer_embeddings():
-    with h5py.File('data/processed/vae/english_w2v_filtered.hd5', 'r') as f:
+    with h5py.File('data/processed/english_w2v_filtered.hd5', 'r') as f:
         return torch.from_numpy(np.array(f['data'])).float().to(conf['device'])
 
 
@@ -97,7 +97,7 @@ def main():
         # print('\n### Linear Interpolation ###:\n')
         # print(s1)
         # interpolated = translate(vocab, model._interpolate(get_z(x1, x1_lens, model),
-        #                                                    get_z(x2, x2_lens, model), 50))
+        #                                                    get_z(x2, x2_lens, model), 30))
         # for s_id in range(0, len(interpolated), conf['beam_size']):
         #     sentences = []
         #     for i in range(conf['beam_size']):
@@ -106,11 +106,10 @@ def main():
         # print(s2)
 
         print('\n### Testing VAE+Scoring function ###:\n')
-        n = 1
+        n = 5
         scorer_emb_wts = load_scorer_embeddings()
         specs = get_specs(n)
-        random_sampled = translate(vocab, model._random_sample(n, specs,
-                                                               scorer_emb_wts))
+        random_sampled = translate(vocab, model._random_sample(n, specs))
         for s in random_sampled:
             print(s)
 

@@ -13,7 +13,13 @@ class AutoEncoder(nn.Module):
         self.config = config
         self.vocab = vocab
         self.embedding_wts = embedding_wts
+        # keep them same by default. if needed, the self.scorer_emb_wts can be
+        # manually updated in the concerned script. But note that we'll
+        # need to call _load_scorer method there too (so that the entire scoring)
+        # function is updated and not just the variable :P
+        self.scorer_emb_wts = embedding_wts
         self.build_model()
+        self.scorer = self._load_scorer(self.scorer_emb_wts, 'bimodal')
 
     def build_model(self):
         self.unit = self.config['unit']
@@ -75,6 +81,8 @@ class AutoEncoder(nn.Module):
         self.rec_loss = nn.CrossEntropyLoss(ignore_index=self.pad_idx)
 
     def _load_scorer(self, emb_wts, _type='rnn'):
+        if not self.config['pretrained_scorer']:
+            return None
         if _type == 'rnn':
             scorer = scoring_functions.RNNScorer(self.config, emb_wts)
         elif _type == 'bimodal':
@@ -176,13 +184,12 @@ class AutoEncoder(nn.Module):
         vocab_size = self.vocab.size
 
         if y_specs is not None:
-            scorer = self._load_scorer(scorer_emb_wts, 'bimodal')
             # tensor to maintain the already guess subsequence for k beams
             # this tensor is intialized such that it has all vocab tokens as
             # candidates for the k beams but at each time step, we will
             # replace all of them with a single token for each beam
             # candidate_subseq => (max_y_len, bs*k*vocab)
-            scorer_vocab = scorer_emb_wts.shape[0]
+            scorer_vocab = self.scorer_emb_wts.shape[0]
             candidate_subseq = torch.arange(scorer_vocab).repeat(
                 bs*self.beam_size).unsqueeze(0).repeat(max_y_len, 1).to(
                 self.device)
@@ -201,14 +208,24 @@ class AutoEncoder(nn.Module):
         #  to represent the last #enc_layers layers of decoder hidden
         if self.config['dec_n_layers'] > self.config['enc_n_layers']:
             raise \
-                NotImplementedError("(dec_n_layers > enc_n_layers) Decoder" +
+                NotImplementedError("(dec_n_layers > enc_n_layers) Decoder " +
                                     "can't have more layers than the encoder")
         else:
             if self.unit == 'lstm':
-                dec_hidden = (
-                    z[0][-self.config['dec_n_layers']:, :, :],
-                    z[1][-self.config['dec_n_layers']:, :, :]
-                    )
+                try:
+                    # this will throw an error when z comes from an encoder
+                    # other DAE's (VAE, in this case)
+                    dec_hidden = (
+                        z[0][-self.config['dec_n_layers']:, :, :],
+                        z[1][-self.config['dec_n_layers']:, :, :]
+                        )
+                except Exception as e:
+                    # consider h_n to be zero
+                    dec_hidden = (
+                        torch.zeros(self.config['dec_n_layers'], bs,
+                                    self.latent_dim).to(self.device),
+                        z[-self.config['dec_n_layers']:, :, :]
+                        )
                 # doesn't make a different for beam_size = 1
                 dec_hidden = (
                     dec_hidden[0].repeat(1, self.beam_size, 1),
@@ -243,14 +260,14 @@ class AutoEncoder(nn.Module):
                     new_logits = decoder_outputs[:t].view(t, bs,
                                                           self.beam_size,
                                                           vocab_size)
-                    # run a softmax on the last dimension
-                    new_logits = torch.log_softmax(new_logits, dim=-1)
+                    # run a softmax on the last dimension. No, thank you!
+                    # new_logits = torch.log_softmax(new_logits, dim=-1)
                     if y_specs is not None:
                         candidates = candidate_subseq[:t+1]
                         new_logits = self._get_scores(new_logits,
                                                       candidates,
                                                       y_specs,
-                                                      scorer)
+                                                      self.scorer)
                     # extract probabilities of the tokens and flatten logits
                     new_logits = new_logits[-1].squeeze(0).view(bs, -1)
                     # new_logits => (bs, beam_size*vocab_size)

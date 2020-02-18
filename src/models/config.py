@@ -33,7 +33,7 @@ model_config = {
     'patience': 0,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
-    'model_code': 'dae',  # bimodal_scorer/bilstm_scorer/dae/vae/lyrics_clf/spec_clf
+    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/lyrics_clf/spec_clf
 
     'clip': 50.0,  # values above which to clip the gradients
     'tf_ratio': 1.0,  # teacher forcing ratio
@@ -43,7 +43,7 @@ model_config = {
     'batch_size': 100,
     'enc_n_layers': 1,
     'dec_n_layers': 1,
-    'dec_mode': 'greedy',  # type of decoding to use {greedy, beam}
+    'dec_mode': 'beam',  # type of decoding to use {greedy, beam}
     'bidirectional': True,  # make the encoder bidirectional or not
     'attn_model': None,  # None/dot/concat/general
 
@@ -58,7 +58,7 @@ model_config = {
     'MAX_LENGTH': 15,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,
@@ -79,9 +79,9 @@ model_config = {
     'use_embeddings?': True,
     'generate_spectrograms': False,
     'pretrained_model': False,  # {'vae-1L-bilstm-11', False},
-    'pretrained_scorer': False,  # {'bimodal_scorer-1L-bilstm-0', False}
-    # 'pretrained_model': 'vae-1L-bilstm-2',  # {'vae-1L-bilstm-11', False},
-    # 'pretrained_scorer': 'bimodal_scorer-1L-bilstm-0',  # {'bimodal_scorer-1L-bilstm-0', False}
+    # 'pretrained_scorer': False,  # {'bimodal_scorer-1L-bilstm-0', False}
+    # 'pretrained_model': 'vae-1L-bilstm-15',  # {'vae-1L-bilstm-11', False},
+    'pretrained_scorer': 'bimodal_scorer-1L-bilstm-12',  # {'bimodal_scorer-1L-bilstm-0', False}
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
     # 'file_name': '/home/d35kumar/Github/lyrics_generation/data/raw/split_info.txt',
@@ -105,7 +105,6 @@ def get_dependent_params(model_config):
         model_config['beam_size'] = 1
     m_code = model_config['model_code']
     processed_path = 'data/processed/{}/'.format(m_code)
-    # processed_path = 'data/processed/vae/'
     if not os.path.exists(processed_path):
         os.mkdir(processed_path)
 
@@ -119,8 +118,8 @@ def get_dependent_params(model_config):
     if m_code == 'vae':
         # model-specific hyperparams
         model_config['latent_dim'] = 100
-        model_config['anneal_till'] = 500
-        model_config['x0'] = 4500
+        model_config['anneal_till'] = 1980
+        model_config['x0'] = 6500
         model_config['k'] = 5e-3  # slope of the logistic annealing function (for vae)
         model_config['anneal_type'] = 'tanh'  # for vae {tanh, logistic, linear}
         model_config['sampling_temperature'] = 5e-3  # z_temp to be used during inference

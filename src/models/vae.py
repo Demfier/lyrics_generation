@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from models import dae
 from torch import nn, optim
+from pprint import pprint
 
 from torchvision.models import vgg16
 
@@ -72,7 +73,6 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         step = min(self.anneal_till, step)
         if step == 0:
             return 0.0
-
         if self.anneal_type == 'tanh':
             return np.round((np.tanh((step - self.x0)/1000) + 1)/2, decimals=6)
         elif self.anneal_type == 'logistic':
@@ -85,7 +85,7 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         z = torch.randn(n, self.latent_dim).unsqueeze(0)
         y = (torch.ones(self.config['MAX_LENGTH'], n) * self.sos_idx).long()
         return self._decode(z.to(self.device), y.to(self.device), infer=True,
-                            y_specs=specs, scorer_emb_wts=scorer_emb_wts)
+                            y_specs=specs, scorer_emb_wts=None)
 
     def _interpolate(self, z1, z2, steps):
         self.z_temp = self.config['sampling_temperature']
@@ -137,14 +137,19 @@ class VariationalAutoEncoder(dae.AutoEncoder):
 
         if step is not None:  # do kl annealing only for training phase
             kl_weight = self._get_kl_weight(step)
-            kl_loss = self._calculate_kl(mu, log_sigma)
-            wtd_kl_loss = kl_weight * kl_loss
-            loss += wtd_kl_loss
-            kl_params = {
-                'loss': kl_loss.item(),
-                'weight': kl_weight,
-                'wtd_loss': wtd_kl_loss.item()
-                }
+            if kl_weight == 0:
+                kl_params = {'loss': 0.0, 'weight': 0.0, 'wtd_loss': 0.0}
+            else:
+                kl_loss = self._calculate_kl(mu, log_sigma)
+                wtd_kl_loss = kl_weight * kl_loss
+                loss += wtd_kl_loss
+                kl_params = {
+                    'loss': kl_loss.item(),
+                    'weight': kl_weight,
+                    'wtd_loss': wtd_kl_loss.item()
+                    }
+            # pprint(kl_params)
+            # print(loss)
         else:
             kl_params = {'loss': None, 'weight': None, 'wtd_loss': None}
 
