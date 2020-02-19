@@ -80,14 +80,17 @@ class VariationalAutoEncoder(dae.AutoEncoder):
         else:  # linear
             return min(1, step/self.x0)
 
-    def _random_sample(self, n, specs=None, scorer_emb_wts=None):
+    def _random_sample(self, n, z=None, specs=None, scorer_emb_wts=None):
         self.z_temp = self.config['sampling_temperature']
-        z = torch.randn(n, self.latent_dim).unsqueeze(0)
+        if z is None:
+            z = torch.randn(n, self.latent_dim).unsqueeze(0)
         y = (torch.ones(self.config['MAX_LENGTH'], n) * self.sos_idx).long()
-        return self._decode(z.to(self.device), y.to(self.device), infer=True,
-                            y_specs=specs, scorer_emb_wts=None)
+        return z, self._decode(z.to(self.device), y.to(self.device), infer=True,
+                               y_specs=specs, scorer_emb_wts=None)
 
     def _interpolate(self, z1, z2, steps):
+        z1 = z1.cpu()
+        z2 = z2.cpu()
         self.z_temp = self.config['sampling_temperature']
         y = (torch.ones(self.config['MAX_LENGTH'], steps + 2) * self.sos_idx).long()
         z = torch.tensor(np.linspace(z1, z2, steps)).squeeze().unsqueeze(0)

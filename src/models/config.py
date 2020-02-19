@@ -58,7 +58,7 @@ model_config = {
     'MAX_LENGTH': 15,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,
@@ -78,9 +78,9 @@ model_config = {
     'use_melfeats?': False,  # whether to use already extracted img features or use calculate them on the fly while encoding
     'use_embeddings?': True,
     'generate_spectrograms': False,
-    'pretrained_model': False,  # {'vae-1L-bilstm-11', False},
+    # 'pretrained_model': False,  # {'vae-1L-bilstm-11', False},
     # 'pretrained_scorer': False,  # {'bimodal_scorer-1L-bilstm-0', False}
-    # 'pretrained_model': 'vae-1L-bilstm-15',  # {'vae-1L-bilstm-11', False},
+    'pretrained_model': 'vae-1L-bilstm-34',  # {'vae-1L-bilstm-11', False},
     'pretrained_scorer': 'bimodal_scorer-1L-bilstm-12',  # {'bimodal_scorer-1L-bilstm-0', False}
     'save_dir': 'saved_models/',
     'data_dir': 'data/processed/',
@@ -100,7 +100,7 @@ model_config = {
 
 def get_dependent_params(model_config):
     if model_config['dec_mode'] == 'beam':
-        model_config['beam_size'] = 3
+        model_config['beam_size'] = 1
     else:
         model_config['beam_size'] = 1
     m_code = model_config['model_code']
@@ -123,7 +123,7 @@ def get_dependent_params(model_config):
         model_config['k'] = 5e-3  # slope of the logistic annealing function (for vae)
         model_config['anneal_type'] = 'tanh'  # for vae {tanh, logistic, linear}
         model_config['sampling_temperature'] = 5e-3  # z_temp to be used during inference
-        model_config['scorer_temp'] = 0.4
+        model_config['scorer_temp'] = 0.1
     elif m_code == 'dae':
         # there is no latent space in a dae!
         model_config['latent_dim'] = model_config['hidden_dim']

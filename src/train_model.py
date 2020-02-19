@@ -3,7 +3,6 @@ import h5py
 import random
 import argparse
 import numpy as np
-
 import torch
 from torch import nn, optim
 

@@ -114,19 +114,20 @@ class AutoEncoder(nn.Module):
         # compatibility scores -> (bs, beam_size*v)
         # print('Passing candidates through {}'.format(type(scorer).__name__))
         continue_count = 0
-        for iter in tqdm(range(0, n_candidates, self.config['batch_size'])):
+        for iter in (range(0, n_candidates, self.config['batch_size'])):
             curr_candidates = candidates[:, iter:iter+self.config['batch_size']]
             curr_mel_specs = mel_specs[iter // (k*v)].unsqueeze(0).repeat(
                 curr_candidates.shape[1], 1, 1, 1)
-            curr_scores = scorer({
-                'lyrics_seq': curr_candidates,
-                'mel_spec': curr_mel_specs
-                })[:, 1]  # get scores for class 1
+            # get scores for class 1
+            curr_scores = torch.nn.functional.softmax(scorer({
+                            'lyrics_seq': curr_candidates,
+                            'mel_spec': curr_mel_specs
+                            }), dim=1)[:, 1]
             scores = torch.cat((scores, curr_scores))
         # adjust scores to make it broadcastable wrt old_scores
         scores = scores.view(-1, k, v).unsqueeze(0)
         # return updated scores -> (t, bs, k, v)
-        return (old_scores * torch.exp(scores/self.config['scorer_temp']))
+        return (old_scores * torch.exp(scores / self.config['scorer_temp']))
 
     def _encode(self, x, x_lens):
         max_x_len, bs = x.shape
@@ -180,7 +181,7 @@ class AutoEncoder(nn.Module):
         TODO: Handle bidirectional decoders
         """
         max_y_len, bs = y.shape
-        # max_y_len = 6
+        max_y_len = 8
         vocab_size = self.vocab.size
 
         if y_specs is not None:
@@ -257,9 +258,9 @@ class AutoEncoder(nn.Module):
             if infer or (not do_tf):
                 if self.config['dec_mode'] == 'beam':
                     # split beam and bs dim from dec_outputs
-                    new_logits = decoder_outputs[:t].view(t, bs,
-                                                          self.beam_size,
-                                                          vocab_size)
+                    new_logits = decoder_outputs[:t+1].view(t+1, bs,
+                                                            self.beam_size,
+                                                            vocab_size)
                     # run a softmax on the last dimension. No, thank you!
                     # new_logits = torch.log_softmax(new_logits, dim=-1)
                     if y_specs is not None:

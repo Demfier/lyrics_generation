@@ -41,16 +41,16 @@ def show_img(data, name):
     skimage.io.imsave(name, data)
 
 
-def get_specs(n):
+def get_specs(n=2):
     with open('data/processed/bimodal_scorer/spec_array.pkl', 'rb') as f:
         spec_array = pickle.load(f)
     # randomly choose n spec_ids
-    spec_ids = np.random.choice(list(spec_array.keys()), size=n)
-    print(spec_ids)
+    spec_ids = list(spec_array.keys())
+    # print(spec_ids)
     # for k in spec_ids:
     #     show_img(np.array(spec_array[k], dtype=np.uint8), str(k) + '.png')
-    specs = [[spec_array[k]] for k in spec_ids]
-    return torch.tensor(specs).float().view(-1, 224, 224, 3).permute(0, 3, 1, 2).contiguous().to(conf['device'])
+    for k in spec_ids:
+        yield k, torch.tensor([spec_array[k]]).float().view(-1, 224, 224, 3).permute(0, 3, 1, 2).contiguous().to(conf['device'])
 
 
 def load_scorer_embeddings():
@@ -70,7 +70,6 @@ def main():
         model = vae.BimodalVED(conf, vocab, embedding_wts)
     else:
         raise ValueError('Invalid model code: {}'.format(conf['model_code']))
-
     model.load_state_dict(
         torch.load(
             '{}{}'.format(conf['save_dir'], conf['pretrained_model']),
@@ -80,38 +79,44 @@ def main():
 
     with torch.no_grad():
         model.eval()
-        # print('\n### Random Sampling ###:\n')
-        # random_sampled = translate(vocab, model._random_sample(9))
-        # for s in random_sampled:
-        #     print(s)
+        print('\n### Random Sampling ###:\n')
+        for s in translate(vocab, model._random_sample(9)[1]):
+            print(s)
         # with open('random_sampled_sf.txt', 'w') as f:
         #     f.write('\n'.join(random_sampled))
 
-        # _, val_pairs, _ = preprocess.prepare_data(conf)
-        # s1 = random.choice(val_pairs)[0]
-        # s2 = random.choice(val_pairs)[0]
+        _, val_pairs, _ = preprocess.prepare_data(conf)
+        s1 = random.choice(val_pairs)[0]
+        s2 = random.choice(val_pairs)[0]
 
-        # x1, x1_lens, _ = preprocess._btmcd(vocab, [(s1, s1)], conf)
-        # x2, x2_lens, _ = preprocess._btmcd(vocab, [(s2, s2)], conf)
+        x1, x1_lens, _ = preprocess._btmcd(vocab, [(s1, s1)], conf)
+        x2, x2_lens, _ = preprocess._btmcd(vocab, [(s2, s2)], conf)
 
-        # print('\n### Linear Interpolation ###:\n')
-        # print(s1)
-        # interpolated = translate(vocab, model._interpolate(get_z(x1, x1_lens, model),
-        #                                                    get_z(x2, x2_lens, model), 30))
-        # for s_id in range(0, len(interpolated), conf['beam_size']):
-        #     sentences = []
-        #     for i in range(conf['beam_size']):
-        #         sentences.append(interpolated[s_id+i])
-        #     print(sentences)
-        # print(s2)
+        print('\n### Linear Interpolation ###:\n')
+        print(s1)
+        interpolated = translate(vocab, model._interpolate(get_z(x1, x1_lens, model),
+                                                           get_z(x2, x2_lens, model), 30))
+        for s_id in range(0, len(interpolated), conf['beam_size']):
+            sentences = []
+            for i in range(conf['beam_size']):
+                sentences.append(interpolated[s_id+i])
+            print(sentences)
+        print(s2)
 
         print('\n### Testing VAE+Scoring function ###:\n')
-        n = 5
         scorer_emb_wts = load_scorer_embeddings()
-        specs = get_specs(n)
-        random_sampled = translate(vocab, model._random_sample(n, specs))
-        for s in random_sampled:
-            print(s)
+
+        i = 0
+        for spec_id, spec in get_specs():
+            print(i, spec_id)
+            z, logits = model._random_sample(1)
+            random_sampled = translate(vocab, logits)
+            with open('reports/outputs/random_sampled_{}.txt'.format(conf['pretrained_model']), 'a') as f:
+                f.write('\n{}:{}\n'.format(spec_id, '\n'.join(random_sampled)))
+            s = translate(vocab, model._random_sample(1, z, spec)[1])
+            with open('reports/outputs/random_sampled_{}_with_scorer_{}_temp_{}.txt'.format(conf['pretrained_model'], conf['pretrained_scorer'], conf['scorer_temp']), 'a') as f:
+                f.write('\n{}:{}\n'.format(spec_id, '\n'.join(s)))
+            i += 1
 
 
 if __name__ == '__main__':
