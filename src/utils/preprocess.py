@@ -36,6 +36,8 @@ def process_raw(config):
         dataset = process_lyrics_clf(config)
     elif config['model_code'] == 'spec_clf':
         dataset = process_spec_clf(config)
+    elif 'lm' in config['model_code']:
+        dataset = process_lm(config)
 
     save_path = 'data/processed/{}/combined_dataset.pkl'.format(
         config['model_code'])
@@ -166,6 +168,24 @@ def process_lyrics_clf(config):
         sample['lyrics'] = lyrics
         sample['label'] = artists.index(artist)
         dataset.append(sample)
+    return dataset
+
+
+def process_lm(config):
+    print('Loading lyrics file for lyrics clf.')
+    with open(config['dataset_lyrics']) as f:
+        lines = f.readlines()
+        np.random.shuffle(lines)
+
+    dataset = {}
+    for line in tqdm(lines):
+        spec_id, lyrics = line.strip().split('\t')
+        lyrics = normalize_string(
+                lyrics.translate(str.maketrans('', '', string.punctuation)))
+        artist = spec_id.split('_', 1)[0]
+        if artist not in dataset:
+            dataset[artist] = []
+        dataset[artist].append(lyrics)
     return dataset
 
 
