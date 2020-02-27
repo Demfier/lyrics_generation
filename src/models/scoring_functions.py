@@ -4,6 +4,7 @@ This file contains code for the scoring function (an LSTM Classifier)
 import torch
 from torch import nn
 import torch.nn.functional as F
+from tqdm import tqdm
 
 from torchvision.models import vgg16
 
@@ -211,6 +212,67 @@ class BiModalScorer(nn.Module):
         else:  # gru/rnn
             rnn_output, hidden = self.rnn(embedded)
         return rnn_output, hidden
+
+    def decode(self, specs):
+        """
+        Takes as input, the spectrogram and a subsequence and generates the
+        most likely token from the vocab for next time step based on
+        compatibility score
+
+        y_specs => (bs, num_channels, w, h)
+        """
+        # (bs, 50)
+        vocab_size = self.embedding_wts.shape[0]
+        music_features = self.img_encoder(specs)
+        max_y_len = 100
+        bs = music_features.shape[0]
+        # creates a tensor of shape (max_y_len, bs, vocab_size) with all the entries
+        decoder_outputs = torch.arange(vocab_size).repeat(
+            max_y_len, bs, 1).to(self.config['device'])
+        final_outputs = (
+            torch.ones(max_y_len+1, bs).long()*self.config['SOS_TOKEN'])\
+            .to(self.config['device'])
+
+        for t in range(1, max_y_len):
+            # (t, bs, vocab_size)
+            subsequence_so_far = decoder_outputs[:t+1]
+            # Create candidates here
+            output = \
+                self._decode_token(music_features, subsequence_so_far).long()
+            final_outputs[t] = output
+            decoder_outputs[t] = output.repeat(1, vocab_size)
+        return final_outputs
+
+    def _decode_token(self, music_features, subsequence_so_far):
+        """
+        accepts a batch of mel features and the subsequence generated so far
+        and returns the most probable token in the vocabulary
+        corresponding to each spectrogram
+        music_features => (bs, 50)
+        subsequence_so_far => (t, bs, vocab_size)
+        """
+        subsequence_so_far = subsequence_so_far.permute(1, 0, 2).contiguous()
+        bs, _, vocab_size = subsequence_so_far.shape
+        best_tokens_for_specs = []
+        self.bs = vocab_size
+        for b in range(bs):
+            # (t, bs, vocab_size, embedding_dim)
+            lyrics_embeddings = self.embedding(subsequence_so_far[b])
+            # make batch_size first
+            # (bs, t, vocab_size, embedding_dim)
+            lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
+            lyrics_attended = self.attn(lyrics_output, lyrics_hidden)
+            # (vocab_size, 50+hidden_dim)
+            fused_features = self.fusion(
+                music_features[b].repeat(self.bs, 1),
+                lyrics_attended)
+            # extract scores for class 1
+            scores, indices = torch.nn.functional.softmax(
+                self.out(fused_features),
+                dim=-1)[:, 1].topk(k=2, dim=-1)
+            best_tokens_for_specs.append(indices[1].item())
+        # (bs)
+        return torch.tensor(best_tokens_for_specs).to(self.config['device'])
 
     def forward(self, x):
         # music_melspec -> batch_size, num_channels, width, height (bs, 3, 224, 224) when

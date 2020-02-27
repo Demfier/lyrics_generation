@@ -96,7 +96,7 @@ class AutoEncoder(nn.Module):
                        map_location=self.device)['model'])
         return scorer.to(self.device)
 
-    def _get_scores(self, old_scores, candidates, mel_specs, scorer):
+    def _get_scores(self, old_scores, candidates, mel_specs):
         """
         updates scores for all the candidates by measuring their compatability
         with the respective spectrograms
@@ -119,7 +119,7 @@ class AutoEncoder(nn.Module):
             curr_mel_specs = mel_specs[iter // (k*v)].unsqueeze(0).repeat(
                 curr_candidates.shape[1], 1, 1, 1)
             # get scores for class 1
-            curr_scores = torch.nn.functional.softmax(scorer({
+            curr_scores = torch.nn.functional.softmax(self.scorer({
                             'lyrics_seq': curr_candidates,
                             'mel_spec': curr_mel_specs
                             }), dim=1)[:, 1]
@@ -267,8 +267,7 @@ class AutoEncoder(nn.Module):
                         candidates = candidate_subseq[:t+1]
                         new_logits = self._get_scores(new_logits,
                                                       candidates,
-                                                      y_specs,
-                                                      self.scorer)
+                                                      y_specs)
                     # extract probabilities of the tokens and flatten logits
                     new_logits = new_logits[-1].squeeze(0).view(bs, -1)
                     # new_logits => (bs, beam_size*vocab_size)

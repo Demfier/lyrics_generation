@@ -33,7 +33,7 @@ model_config = {
     'patience': 0,  # number of epochs to wait before decreasing lr
     'min_lr': 1e-7,  # minimum allowable value of lr
     'task': 'rec',  # mt/dialog/rec/dialog-rec
-    'model_code': 'vae',  # bimodal_scorer/bilstm_scorer/dae/vae/lyrics_clf/spec_clf
+    'model_code': 'bimodal_scorer',  # bimodal_scorer/bilstm_scorer/dae/vae/lyrics_clf/spec_clf
 
     'clip': 50.0,  # values above which to clip the gradients
     'tf_ratio': 1.0,  # teacher forcing ratio
@@ -58,7 +58,7 @@ model_config = {
     'MAX_LENGTH': 15,  # Max length of a sentence
 
     # run-time conf
-    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
+    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',  # gpu_id ('x' for multiGPU mode)
     'wemb_type': 'w2v',  # type of word embedding to use: w2v/fasttext
     'lang_pair': 'en-en',  # src-target language pair
     'use_scheduler': True,
@@ -91,7 +91,7 @@ model_config = {
     # 'spectrograms': '/home/d35kumar/Github/lyrics_generation/data/processed/spectrograms_split/'
     'dataset_path': '/collection/gsahu/ae/lyrics_generation/data/raw/DALI_v1.0/',
     'dataset_audio': '/collection/gsahu/ae/lyrics_generation/data/raw/ogg_audio/',  # Path to store dali audio files
-    'dataset_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/lyrics_7artists.txt',  # Path to load dali lyrics
+    'dataset_lyrics': '/collection/gsahu/ae/lyrics_generation/data/raw/Lyrics_Data/complete_lyrics_2artists.txt',  # Path to load dali lyrics
     'split_spec': '/collection/gsahu/ae/lyrics_generation/data/raw/Lyrics_Data/',  # Path to load dali lyrics
     # 'dali_path': '/home/gsahu/code/lyrics_generation/data/raw/DALI_v1.0/',
     # 'dali_audio': '/home/gsahu/code/lyrics_generation/data/raw/dali_audio/',  # Path to store dali audio files
@@ -123,7 +123,7 @@ def get_dependent_params(model_config):
         model_config['k'] = 5e-3  # slope of the logistic annealing function (for vae)
         model_config['anneal_type'] = 'tanh'  # for vae {tanh, logistic, linear}
         model_config['sampling_temperature'] = 5e-3  # z_temp to be used during inference
-        model_config['scorer_temp'] = 0.1
+        model_config['scorer_temp'] = 0.09
     elif m_code == 'dae':
         # there is no latent space in a dae!
         model_config['latent_dim'] = model_config['hidden_dim']
