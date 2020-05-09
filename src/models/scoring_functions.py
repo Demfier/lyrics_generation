@@ -5,6 +5,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from tqdm import tqdm
+import sys
 
 from torchvision.models import vgg16
 
@@ -153,20 +154,29 @@ class BiModalScorer(nn.Module):
                               num_layers=self.config['n_layers'],
                               dropout=self.dropout,
                               bidirectional=self.bidirectional)
+        if config['pretrained_spec_clf']:
+            self.img_encoder = SpecOnlyClassifier(config)
+            self.img_encoder.load_state_dict(
+                torch.load(
+                    '{}{}'.format(config['save_dir'],
+                                  config['pretrained_spec_clf']),
+                    map_location=config['device'])['model'])
+            self.img_encoder = self.img_encoder.img_encoder
+        else:
+            self.img_encoder = vgg16(pretrained=True)
+            self.img_encoder.classifier = nn.Sequential(
+                nn.Linear(self.img_encoder.classifier[0].in_features, 512),
+                nn.Linear(512, 128),
+                nn.Linear(128, 50))
 
-        self.img_encoder = vgg16(pretrained=True)
-        # Keep VGG trainable
+        # Keep VGG frozen
         for p in self.img_encoder.parameters():
-            p.requires_grad = True
-
-        self.img_encoder.classifier = nn.Sequential(
-            nn.Linear(self.img_encoder.classifier[0].in_features, 512),
-            nn.Linear(512, 128),
-            nn.Linear(128, 50))
+            p.requires_grad = False
+        self.attn2out = nn.Linear(self.config['hidden_dim'], 50)
 
         self.out = nn.Sequential(
             nn.Dropout(self.dropout),
-            nn.Linear(50 + self.config['hidden_dim'], self.output_dim)
+            nn.Linear(50 + self.config['hidden_dim'], 1)
             )
 
     def pool(self, rnn_output):
@@ -224,7 +234,8 @@ class BiModalScorer(nn.Module):
         # (bs, 50)
         vocab_size = self.embedding_wts.shape[0]
         music_features = self.img_encoder(specs)
-        max_y_len = 100
+        print(music_features)
+        max_y_len = 20
         bs = music_features.shape[0]
         # creates a tensor of shape (max_y_len, bs, vocab_size) with all the entries
         decoder_outputs = torch.arange(vocab_size).repeat(
@@ -252,25 +263,30 @@ class BiModalScorer(nn.Module):
         subsequence_so_far => (t, bs, vocab_size)
         """
         subsequence_so_far = subsequence_so_far.permute(1, 0, 2).contiguous()
-        bs, _, vocab_size = subsequence_so_far.shape
+        bs, t, vocab_size = subsequence_so_far.shape
         best_tokens_for_specs = []
         self.bs = vocab_size
         for b in range(bs):
-            # (t, bs, vocab_size, embedding_dim)
+            # (t, vocab_size, embedding_dim)
             lyrics_embeddings = self.embedding(subsequence_so_far[b])
             # make batch_size first
-            # (bs, t, vocab_size, embedding_dim)
+            # (t, vocab_size, embedding_dim)
             lyrics_output, lyrics_hidden = self.encoder(lyrics_embeddings)
-            lyrics_attended = self.attn(lyrics_output, lyrics_hidden)
+            lyrics_attended = (self.attn(lyrics_output, lyrics_hidden))
             # (vocab_size, 50+hidden_dim)
             fused_features = self.fusion(
                 music_features[b].repeat(self.bs, 1),
                 lyrics_attended)
             # extract scores for class 1
-            scores, indices = torch.nn.functional.softmax(
-                self.out(fused_features),
-                dim=-1)[:, 1].topk(k=2, dim=-1)
-            best_tokens_for_specs.append(indices[1].item())
+            x = self.out(fused_features)[:, 1]
+            # if t <= 3:
+            #     scores, indices = x.topk(k=2, dim=-1)
+            #     best_tokens_for_specs.append(indices[1].item())
+            # else:
+            scores, indices = x.topk(k=5, dim=-1)
+            print(scores, indices)
+            best_tokens_for_specs.append(indices[0].item())
+
         # (bs)
         return torch.tensor(best_tokens_for_specs).to(self.config['device'])
 
@@ -306,7 +322,7 @@ class SpecOnlyClassifier(nn.Module):
         self.img_encoder = vgg16(pretrained=True)
         # Keep VGG trainable
         for p in self.img_encoder.parameters():
-            p.requires_grad = True
+            p.requires_grad = False
 
         self.img_encoder.classifier = nn.Sequential(
             nn.Linear(self.img_encoder.classifier[0].in_features, 512),

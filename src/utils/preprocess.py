@@ -32,12 +32,16 @@ def process_raw(config):
         dataset = process_bimodal(config)
     elif config['model_code'] in {'dae', 'vae'}:
         dataset = process_ae(config)
+    elif config['model_code'] in {'bdae', 'bvae'}:
+        dataset = process_bimodal_ae(config)
     elif config['model_code'] == 'lyrics_clf':
         dataset = process_lyrics_clf(config)
     elif config['model_code'] == 'spec_clf':
         dataset = process_spec_clf(config)
     elif 'lm' in config['model_code']:
         dataset = process_lm(config)
+    elif config['model_code'] == 'IC_bimodal_scorer':
+        dataset = process_ic_bimodal(config)
 
     save_path = 'data/processed/{}/combined_dataset.pkl'.format(
         config['model_code'])
@@ -47,6 +51,51 @@ def process_raw(config):
     return dataset
 
 
+def make_artist_song_dict(lines):
+    songs = {}
+
+    for line in lines:
+        spec_id, _ = line.strip().split('\t')
+        artist, _ = spec_id.split('_', 1)
+        if artist not in songs:
+            songs[artist] = {}
+        # get song name with id of the subsong removed
+        if artist in ['DepecheMode', 'NineInchNails']:
+            song = spec_id.rsplit('_', 1)[0]
+        else:
+            song = spec_id[:-3]
+
+        if song not in songs[artist]:
+            songs[artist][song] = []
+        songs[artist][song].append(spec_id)
+
+    print('Total unique songs per artist:')
+    for k in songs:
+        print('{}: {}'.format(k, len(songs[k])))
+    return songs
+
+
+def prepare_held_out_songs(songs):
+    """Accepts artist->song dict and prepares a held out dataset"""
+    ho_val = set()
+    ho_test = set()
+    for artist in songs:
+        artist_ho = np.random.choice(list(songs[artist].keys()), size=10)
+        artist_ho_val = set(np.random.choice(artist_ho, size=5))
+        artist_ho_test = set(artist_ho).difference(artist_ho_val)
+        ho_val = ho_val.union(artist_ho_val)
+        ho_test = ho_test.union(artist_ho_test)
+
+    all_songs = set()
+    for a in songs:
+        all_songs = all_songs.union(set(songs[a].keys()))
+    ho_train = all_songs.difference(ho_val.union(ho_test))
+
+    print('ho distribution')
+    print(len(ho_test), len(ho_train), len(ho_val))
+    return ho_train, ho_test, ho_val
+
+
 def process_bimodal(config):
     """
     This step loads the lyrics data along with its spec file's name
@@ -54,8 +103,15 @@ def process_bimodal(config):
     print('Loading bimodal dataset')
     with open(config['dataset_lyrics']) as f:
         lines = f.readlines()
-        np.random.shuffle(lines)
+        # don't random shuffle here
+        # np.random.shuffle(lines)
+    # Set some songs aside for test and val set
+    songs = make_artist_song_dict(lines)
+
+    ho_train, ho_test, ho_val = prepare_held_out_songs(songs)
+
     dataset = []
+    train, val, test = [], [], []
 
     # maintain a dict of artists and their spec ids to generate negative samples
     spec_ids_dict = {}
@@ -72,6 +128,7 @@ def process_bimodal(config):
 
     spec_array = {}
     print('Compiling actual dataset with positive and negative samples')
+    np.random.shuffle(lines)
     for line in tqdm(lines):
         # eg: DepecheMode_waiting-for-the-night_0.png   I'm waiting for the night to fall
         try:
@@ -82,37 +139,218 @@ def process_bimodal(config):
             mel_path = '{}{}/Specs/{}'.format(config['split_spec'], artist, spec_id)
             if not os.path.exists(mel_path):  # skip if spec doesn't exist
                 continue
-
+            song = spec_id.rsplit('_', 1)[0]
             # Add a positive sample
             spec_array[spec_id] = read_spectrogram(mel_path)
-            subsequences = get_subsequences(lyrics)
-            for l in subsequences:
-                sample = {}
-                sample['lyrics'] = l
-                sample['spec_id'] = spec_id
-                sample['mel_path'] = mel_path
-                sample['label'] = 1
-                dataset.append(sample)
+            sample = {}
+            sample['lyrics'] = lyrics
+            sample['spec_id'] = spec_id
+            sample['mel_path'] = mel_path
+            sample['label'] = 1
+            if song in ho_val:
+                val.append(sample)
+            elif song in ho_test:
+                test.append(sample)
+            else:
+                train.append(sample)
+            dataset.append(sample)
+            # subsequences = get_subsequences(lyrics)
+            # for l in subsequences:
+            #     sample = {}
+            #     sample['lyrics'] = l
+            #     sample['spec_id'] = spec_id
+            #     sample['mel_path'] = mel_path
+            #     sample['label'] = 1
+            #     if song in ho_val:
+            #         val.append(sample)
+            #     elif song in ho_test:
+            #         test.append(sample)
+            #     else:
+            #         train.append(sample)
+            #     dataset.append(sample)
 
             # Add a negative sample
             # get the other artist (works as we have just two artists)
-            artist = artists_bucket[1-artists_bucket.index(artist)]
-            spec_id = np.random.choice(spec_ids_dict[artist])
-            mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
-                                              artist, spec_id)
-            if not os.path.exists(mel_path):  # skip if spec doesn't exist
-                continue
-            for l in subsequences:
-                sample = {}
-                sample['lyrics'] = lyrics
+            if np.random.random() > 0.5:
+                artist = artists_bucket[1-artists_bucket.index(artist)]
+            sample = {}
+            sample['lyrics'] = lyrics
+            sample['label'] = 0
+
+            if song in ho_val:
+                while True:  # keep sampling until we get a different song
+                    song_choices = \
+                        set(songs[artist].keys()).intersection(ho_val)
+                    negative_song = np.random.choice(list(song_choices))
+                    if negative_song != song:
+                        song = negative_song
+                        spec_id = np.random.choice(songs[artist][song])
+                        mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
+                                                          artist, spec_id)
+                        break
+                # skip if spec doesn't exist
+                if not os.path.exists(mel_path):
+                    continue
                 sample['spec_id'] = spec_id
                 sample['mel_path'] = mel_path
-                sample['label'] = 0
-                dataset.append(sample)
+                val.append(sample)
+            elif song in ho_test:
+                while True:
+                    song_choices = \
+                        set(songs[artist].keys()).intersection(ho_test)
+                    negative_song = np.random.choice(list(song_choices))
+                    if negative_song != song:
+                        song = negative_song
+                        spec_id = np.random.choice(songs[artist][song])
+                        mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
+                                                          artist, spec_id)
+                        break
+                # skip if spec doesn't exist
+                if not os.path.exists(mel_path):
+                    continue
+                sample['spec_id'] = spec_id
+                sample['mel_path'] = mel_path
+                test.append(sample)
+            else:
+                while True:
+                    song_choices = \
+                        set(songs[artist].keys()).intersection(ho_train)
+                    negative_song = np.random.choice(list(song_choices))
+                    if negative_song != song:
+                        song = negative_song
+                        spec_id = np.random.choice(songs[artist][song])
+                        mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
+                                                          artist, spec_id)
+                        break
+                # skip if spec doesn't exist
+                if not os.path.exists(mel_path):
+                    continue
+                sample['spec_id'] = spec_id
+                sample['mel_path'] = mel_path
+                train.append(sample)
+            dataset.append(sample)
+            # for l in subsequences:
+            #     sample = {}
+            #     sample['lyrics'] = lyrics
+            #     sample['label'] = 0
+
+            #     if song in ho_val:
+            #         while True:  # keep sampling until we get a different song
+            #             song_choices = \
+            #                 set(songs[artist].keys()).intersection(ho_val)
+            #             negative_song = np.random.choice(list(song_choices))
+            #             if negative_song != song:
+            #                 song = negative_song
+            #                 spec_id = np.random.choice(songs[artist][song])
+            #                 mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
+            #                                                   artist, spec_id)
+            #                 break
+            #         # skip if spec doesn't exist
+            #         if not os.path.exists(mel_path):
+            #             continue
+            #         sample['spec_id'] = spec_id
+            #         sample['mel_path'] = mel_path
+            #         val.append(sample)
+            #     elif song in ho_test:
+            #         while True:
+            #             song_choices = \
+            #                 set(songs[artist].keys()).intersection(ho_test)
+            #             negative_song = np.random.choice(list(song_choices))
+            #             if negative_song != song:
+            #                 song = negative_song
+            #                 spec_id = np.random.choice(songs[artist][song])
+            #                 mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
+            #                                                   artist, spec_id)
+            #                 break
+            #         # skip if spec doesn't exist
+            #         if not os.path.exists(mel_path):
+            #             continue
+            #         sample['spec_id'] = spec_id
+            #         sample['mel_path'] = mel_path
+            #         test.append(sample)
+            #     else:
+            #         while True:
+            #             song_choices = \
+            #                 set(songs[artist].keys()).intersection(ho_train)
+            #             negative_song = np.random.choice(list(song_choices))
+            #             if negative_song != song:
+            #                 song = negative_song
+            #                 spec_id = np.random.choice(songs[artist][song])
+            #                 mel_path = '{}{}/Specs/{}'.format(config['split_spec'],
+            #                                                   artist, spec_id)
+            #                 break
+            #         # skip if spec doesn't exist
+            #         if not os.path.exists(mel_path):
+            #             continue
+            #         sample['spec_id'] = spec_id
+            #         sample['mel_path'] = mel_path
+            #         train.append(sample)
+            #     dataset.append(sample)
         except ValueError as e:
             print('skipping {}...due to value error'.format(lyrics), end='')
 
     print('Saving Mel Spec arrays...')
+    with open('data/processed/{}/spec_array.pkl'.format(
+            config['model_code']), 'wb') as f:
+        pickle.dump(spec_array, f)
+    with open('data/processed/{}/train.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(train, f)
+    with open('data/processed/{}/test.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(test, f)
+    with open('data/processed/{}/val.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(val, f)
+    print('Split dataset')
+    return dataset
+
+
+def process_ic_bimodal(config):
+    """Prepares data for training bimodal scorer on IC task"""
+    print('Loading IC dataset')
+    with open(config['dataset_lyrics']) as f:
+        lines = f.readlines()
+    # skip the first header line and always take the first comment out of 5
+    # only consider half of the dataset for testing
+    lines = lines[1:][::5][:16000]
+    print(lines[:10])
+    # list of all images (to create negative samples)
+    np.random.shuffle(lines)
+    imgs = [_.split('|')[0].strip() for _ in lines]
+    print('Compiling actual dataset')
+    spec_array = {}
+    dataset = []
+    for line in tqdm(lines):
+        try:
+            img_name, _, caption = line.split('|')
+            img_name = img_name.strip()
+            caption = normalize_string(caption.strip())
+            img_path = '{}{}'.format(config['split_spec'], img_name)
+            if not os.path.exists(img_path):
+                continue
+            spec_array[img_name] = read_spectrogram(img_path)
+            sample = {}
+            sample['caption'] = caption
+            sample['img_name'] = img_name
+            sample['img_path'] = img_path
+            sample['label'] = 1
+            dataset.append(sample)
+
+            # Create negative sample
+            sample = {}
+            sample['caption'] = caption
+            while True:
+                negative_img = np.random.choice(imgs)
+                if negative_img != img_name:
+                    img_name = negative_img
+                    img_path = img_path = '{}{}'.format(config['split_spec'], img_name)
+                    break
+            sample['img_name'] = img_name
+            sample['img_path'] = img_path
+            sample['label'] = 0
+            dataset.append(sample)
+        except ValueError as e:
+            print('skipping {}...due to value error'.format(lyrics), end='')
+
+    print('Saving img_arrays...')
     with open('data/processed/{}/spec_array.pkl'.format(
             config['model_code']), 'wb') as f:
         pickle.dump(spec_array, f)
@@ -123,11 +361,15 @@ def process_spec_clf(config):
     print('Loading data file for spec clf.')
     with open(config['dataset_lyrics']) as f:
         lines = f.readlines()
-        np.random.shuffle(lines)
 
+    # Set some songs aside for test and val set
+    songs = make_artist_song_dict(lines)
+    ho_train, ho_test, ho_val = prepare_held_out_songs(songs)
     artists = sorted(list(config['label_names']))
     dataset = []
+    train, val, test = [], [], []
     spec_array = {}
+    np.random.shuffle(lines)
     for line in tqdm(lines):
         # eg: DepecheMode_waiting-for-the-night_0.png   I'm waiting for the night to fall
         spec_id, _ = line.strip().split('\t')  # ignore lyrics
@@ -136,10 +378,16 @@ def process_spec_clf(config):
                                           artist, spec_id)
         if not os.path.exists(mel_path):  # skip if spec doesn't exist
             continue
-
+        song = spec_id.rsplit('_', 1)[0]
         sample = {}
         sample['spec_id'] = spec_id
         sample['label'] = artists.index(artist)
+        if song in ho_val:
+            val.append(sample)
+        elif song in ho_test:
+            test.append(sample)
+        else:
+            train.append(sample)
         dataset.append(sample)
         spec_array[spec_id] = read_spectrogram(mel_path)
 
@@ -147,6 +395,13 @@ def process_spec_clf(config):
     with open('data/processed/{}/spec_array.pkl'.format(
             config['model_code']), 'wb') as f:
         pickle.dump(spec_array, f)
+    with open('data/processed/{}/train.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(train, f)
+    with open('data/processed/{}/test.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(test, f)
+    with open('data/processed/{}/val.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(val, f)
+    print('Split dataset')
     return dataset
 
 
@@ -205,6 +460,54 @@ def process_ae(config):
     return list(set(dataset))
 
 
+def process_bimodal_ae(config):
+    # Reads lyrics dataset file, gets the image z from a pretrained image VAE
+    # and processes the lyrics
+    dataset = []
+    print('Loading lyrics dataset at {}'.format(config['dataset_lyrics']))
+    with open(config['dataset_lyrics'], 'r') as f:
+        lines = f.readlines()
+
+    # Set some songs aside for test and val set
+    songs = make_artist_song_dict(lines)
+
+    ho_train, ho_test, ho_val = prepare_held_out_songs(songs)
+    dataset = []
+    train, val, test = [], [], []
+
+    spec_array = {}
+    print('Compiling dataset with held out val and test...')
+    np.random.shuffle(lines)
+    for line in tqdm(lines):
+        line = line.strip()
+        spec_id, lyrics = line.split('\t')
+        artist = spec_id.split('_', 1)[0]
+        # remove all punctuations from the line
+        lyrics = normalize_string(
+            lyrics.translate(str.maketrans('', '', string.punctuation)))
+
+        if artist in ['DepecheMode', 'NineInchNails']:
+            song = spec_id.rsplit('_', 1)[0]
+        else:
+            song = spec_id[:-3]
+
+        if song in ho_val:
+            val.append([lyrics, spec_id])
+        elif song in ho_test:
+            test.append([lyrics, spec_id])
+        else:
+            train.append([lyrics, spec_id])
+        dataset.append([lyrics, spec_id])
+    with open('data/processed/{}/train.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(train, f)
+    with open('data/processed/{}/test.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(test, f)
+    with open('data/processed/{}/val.pkl'.format(config['model_code']), 'wb') as f:
+        pickle.dump(val, f)
+    print('Split dataset')
+    return dataset
+
+
 def read_spectrogram_batch(spectrogram_paths):
     # remove alpha dimension and resize to 224x224
     return [skimage.transform.resize(s[:, :, :3], (224, 224, 3))
@@ -245,7 +548,10 @@ def create_train_val_split(dataset, config):
 
 
 def build_vocab(config):
-    all_pairs, _ = read_pairs(config)
+    if config['model_code'] == 'bvae':
+        all_pairs, _, _ = read_pairs(config)
+    else:
+        all_pairs, _ = read_pairs(config)
     all_pairs = filter_pairs(all_pairs, config)
     vocab = Vocabulary()
     for pair_or_s in all_pairs:
@@ -280,10 +586,14 @@ def read_pairs(config, mode='all'):
         return read4bimodal(dataset)
     elif config['model_code'] in {'dae', 'vae'}:
         return read4ae(dataset)
+    elif config['model_code'] in {'bvae'}:
+        return read4bimodalae(dataset)
     elif config['model_code'] == 'lyrics_clf':
         return read4lyricsclf(dataset)
     elif config['model_code'] == 'spec_clf':
         return read4specsclf(dataset)
+    elif config['model_code'] == 'IC_bimodal_scorer':
+        return read4ICbimodal(dataset)
 
 
 def read4lyricsclf(dataset):
@@ -308,6 +618,23 @@ def read4bimodal(dataset):
     for v in dataset:
         lyrics_list.append(v['lyrics'])
         spec_ids.append(v['spec_id'])
+        y.append(v['label'])
+    pairs = list(zip(lyrics_list, spec_ids))
+    return pairs, torch.tensor(y).long()
+
+
+def read4ICbimodal(dataset):
+    """
+    dataset is a list of dictionaries with two fields, lyrics and spec_ids
+    and labels
+    """
+    np.random.shuffle(dataset)
+    y = []
+    spec_ids = []
+    lyrics_list = []
+    for v in dataset:
+        lyrics_list.append(v['caption'])
+        spec_ids.append(v['img_name'])
         y.append(v['label'])
     pairs = list(zip(lyrics_list, spec_ids))
     return pairs, torch.tensor(y).long()
@@ -356,6 +683,28 @@ def read4ae(dataset):
         line = normalize_string(o)
         pairs.append([line, line])
     return pairs, []
+
+
+def read4bimodalae(dataset):
+    with open('./data/processed/bvae/spec_array.pkl', 'rb') as f:
+        spec_array = pickle.load(f)
+    pairs = []
+    image_vectors = []
+    for o in dataset:
+        line = normalize_string(o[0])
+        try:
+            x = np.array(spec_array[o[1]])
+            x = x/255.0
+            x = x.astype('float32')
+            x = x.transpose(2, 0, 1)
+            # x = torch.from_numpy(x)
+            # x = x.unsqueeze(0)
+            image_vectors.append(x)
+        except KeyError as e:
+            print('error in read4bimodalae', e)
+            continue
+        pairs.append([line, line])
+    return pairs, torch.from_numpy(np.array(image_vectors)), []
 
 
 def normalize_string(x):
@@ -430,9 +779,19 @@ def load_word_embeddings(config):
 
 
 def prepare_data(config):
-    train_pairs = filter_pairs(read_pairs(config, 'train')[0], config)
-    val_pairs = filter_pairs(read_pairs(config, 'val')[0], config)
-    test_pairs = filter_pairs(read_pairs(config, 'test')[0], config)
+    if config['model_code'] in {'bdae', 'bvae'}:
+        train_pairs, train_image_vec, _ = read_pairs(config, 'train')
+        train_pairs = filter_pairs(train_pairs, config)
+        val_pairs, val_image_vec, _ = read_pairs(config, 'val')
+        val_pairs = filter_pairs(val_pairs, config)
+        test_pairs, test_image_vec, _ = read_pairs(config, 'test')
+        test_pairs = filter_pairs(test_pairs, config)
+        return train_pairs, val_pairs, test_pairs, train_image_vec, \
+            val_image_vec, test_image_vec
+    else:
+        train_pairs = filter_pairs(read_pairs(config, 'train')[0], config)
+        val_pairs = filter_pairs(read_pairs(config, 'val')[0], config)
+        test_pairs = filter_pairs(read_pairs(config, 'test')[0], config)
 
     np.random.shuffle(train_pairs)
     np.random.shuffle(val_pairs)
@@ -590,10 +949,10 @@ def _btmcd(vocab, pairs, config, *args):
     """alias for batch_to_model_compatible_data"""
     if config['model_code'] == 'bilstm_scorer':
         return batch_to_model_compatible_data_bilstm(vocab, pairs, config['device'])
-    elif config['model_code'] == 'bimodal_scorer':
+    elif config['model_code'] in ['bimodal_scorer', 'IC_bimodal_scorer']:
         # args[0] would be spec_array for this case
         return batch_to_model_compatible_data_bimodal(vocab, pairs, config['device'], args[0])
-    elif config['model_code'] in {'dae', 'vae'}:
+    elif config['model_code'] in {'dae', 'vae', 'bvae'}:
         return batch_to_model_compatible_data_ae(vocab, pairs, config['device'])
     elif config['model_code'] == 'lyrics_clf':
         return batch_to_model_compatible_data_lyrics_clf(vocab, pairs, config['device'])

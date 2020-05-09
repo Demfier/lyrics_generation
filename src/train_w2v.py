@@ -12,7 +12,7 @@ class Dataset(object):
     def __iter__(self):
         # input is a pickle file
         for line in pickle.load(open(self.file_path, 'rb')):
-            yield line.split()
+            yield line[0].split()
 
 
 def main(file_path):

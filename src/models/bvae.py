@@ -1,25 +1,23 @@
 import torch
-import random
-from tqdm import tqdm
+import numpy as np
+from models import dae, image_vae
 from torch import nn, optim
-from models import attn_module
-from models import scoring_functions
+import random
+from pprint import pprint
+
+from torchvision.models import vgg16
 
 
-class AutoEncoder(nn.Module):
-    """AutoEncoder model"""
+class BimodalVariationalAutoEncoder(nn.Module):
+    """docstring for VariationalAutoencoder"""
     def __init__(self, config, vocab, embedding_wts):
-        super(AutoEncoder, self).__init__()
+        super(BimodalVariationalAutoEncoder, self).__init__()
         self.config = config
         self.vocab = vocab
         self.embedding_wts = embedding_wts
-        # keep them same by default. if needed, the self.scorer_emb_wts can be
-        # manually updated in the concerned script. But note that we'll
-        # need to call _load_scorer method there too (so that the entire scoring)
-        # function is updated and not just the variable :P
-        self.scorer_emb_wts = embedding_wts
         self.build_model()
-        self.scorer = self._load_scorer(self.scorer_emb_wts, 'bimodal')
+        self.add_vae_attrs()
+        self.load_image_vae()
 
     def build_model(self):
         self.unit = self.config['unit']
@@ -69,8 +67,8 @@ class AutoEncoder(nn.Module):
 
         # All the projection layers
         self.pf = (2 if self.bidirectional else 1)  # project factor
-
-        self.output2vocab = nn.Linear(self.latent_dim + self.embedding_dim,
+        # 128 dim for the spec embedding
+        self.output2vocab = nn.Linear(self.latent_dim + 128 +self.embedding_dim,
                                       self.vocab.size)
 
         self.optimizer = optim.Adam(self.parameters(), self.config['lr'])
@@ -80,54 +78,19 @@ class AutoEncoder(nn.Module):
         # Reconstruction loss
         self.rec_loss = nn.CrossEntropyLoss(ignore_index=self.pad_idx)
 
-    def _load_scorer(self, emb_wts, _type='rnn'):
-        if not self.config['pretrained_scorer']:
-            return None
-        if _type == 'rnn':
-            scorer = scoring_functions.RNNScorer(self.config, emb_wts)
-        elif _type == 'bimodal':
-            scorer = scoring_functions.BiModalScorer(self.config, emb_wts)
-        else:
-            raise ValueError('Invalid scoring function type given')
+    def add_vae_attrs(self):
+        self.anneal_type = self.config['anneal_type']
+        self.anneal_till = self.config['anneal_till']
+        self.k = self.config['k']
+        self.x0 = self.config['x0']
+        self.z_mu = nn.Linear(self.hidden_dim, self.latent_dim)
+        self.z_log_sigma = nn.Linear(self.hidden_dim, self.latent_dim)
 
-        scorer.load_state_dict(
-            torch.load('{}{}'.format(self.config['save_dir'],
-                                     self.config['pretrained_scorer']),
-                       map_location=self.device)['model'])
-        return scorer.to(self.device)
-
-    def _get_scores(self, old_scores, candidates, mel_specs):
-        """
-        updates scores for all the candidates by measuring their compatability
-        with the respective spectrograms
-        candidates: (t, bs, k, vocab_size) where t is the current time step
-        mel_specs: (bs, 3, 224, 224)
-        """
-        # t, bs, k, v = candidates.shape
-        # n_candidates = bs*k*v
-        t, n_candidates = candidates.shape
-        k = self.beam_size
-        v = self.vocab.size
-        # candidates = candidates.view(t, bs*k*v).long()
-        candidates = candidates.long()
-        scores = torch.empty(0).to(self.device)
-        # compatibility scores -> (bs, beam_size*v)
-        # print('Passing candidates through {}'.format(type(scorer).__name__))
-        continue_count = 0
-        for iter in (range(0, n_candidates, self.config['batch_size'])):
-            curr_candidates = candidates[:, iter:iter+self.config['batch_size']]
-            curr_mel_specs = mel_specs[iter // (k*v)].unsqueeze(0).repeat(
-                curr_candidates.shape[1], 1, 1, 1)
-            # get scores for class 1
-            curr_scores = torch.nn.functional.softmax(self.scorer({
-                            'lyrics_seq': curr_candidates,
-                            'mel_spec': curr_mel_specs
-                            }), dim=1)[:, 1]
-            scores = torch.cat((scores, curr_scores))
-        # adjust scores to make it broadcastable wrt old_scores
-        scores = scores.view(-1, k, v).unsqueeze(0)
-        # return updated scores -> (t, bs, k, v)
-        return (old_scores * torch.exp(scores / self.config['scorer_temp']))
+    def load_image_vae(self):
+        self.image_vae = image_vae.VAE()
+        self.image_vae.load_state_dict(torch.load(self.config['image_vae_path'],
+                                       map_location=self.device))
+        self.image_vae.eval()
 
     def _encode(self, x, x_lens):
         max_x_len, bs = x.shape
@@ -140,38 +103,73 @@ class AutoEncoder(nn.Module):
         # outputs => (max_seq_len, bs, hidden_dim * self.pf)
         # h_n (& c_n) => (#layers * self.pf, bs, hidden_dim)
         outputs, hidden = self.encoder(packed)
-
+        if self.unit == 'lstm':
+            hidden = hidden[1]  # ignore h_n
         # outputs => (max_seq_len x bs x hidden_dim * self.pf)
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
         # Construct z from last time_step output
         if self.bidirectional:
             outputs = outputs.view(max_x_len, bs, self.pf, self.hidden_dim)
-            # concatenate forward and backward encoder outputs
+            # sum forward and backward encoder outputs
             outputs = outputs[:, :, 0, :] + outputs[:, :, 1, :]
 
-            if self.unit == 'lstm':
-                # sum forward and backward hidden states
-                c_n = hidden[0].view(self.config['enc_n_layers'],
-                                     self.pf, bs, self.hidden_dim)
-                c_n = c_n[:, 0, :, :] + c_n[:, 1, :, :]
-
-                h_n = hidden[1].view(self.config['enc_n_layers'],
-                                     self.pf, bs, self.hidden_dim)
-                h_n = h_n[:, 0, :, :] + h_n[:, 1, :, :]
-                hidden = (c_n, h_n)
-            else:
-                # sum forward and backward hidden states
-                hidden = hidden.view(self.config['enc_n_layers'],
-                                     self.pf, bs, self.hidden_dim)
-                hidden = hidden[:, 0, :, :] + hidden[:, 1, :, :]
+            # sum forward and backward hidden states
+            hidden = hidden.view(self.config['enc_n_layers'],
+                                 self.pf, bs, self.hidden_dim)
+            hidden = hidden[:, 0, :, :] + hidden[:, 1, :, :]
         # outputs => (max_seq_len x bs x hidden_dim * self.pf)
-        # hidden => (#enc_layers, bs, hidden * self.pf)
-        return {'encoder_outputs': outputs, 'z': hidden}
+        return {
+                'encoder_outputs': outputs,
+                'mu': self.z_mu(hidden),
+                'log_sigma': self.z_log_sigma(hidden)
+                }
 
-    def _create_mask(self, tensor):
-        return torch.ne(tensor, self.pad_idx)
+    def _reparameterize(self, mu, log_sigma):
+        """Samples a gaussian and returns N(mu, I * sigma**2)"""
+        epsilon = torch.randn(mu.size()).to(self.device)
+        z = mu + self.z_temp * (epsilon * torch.exp(log_sigma))
+        return z.to(self.device)
 
-    def _decode(self, z, y, infer, encoder_outputs=None,
+    def _calculate_kl(self, mu, log_sigma):
+        """
+        Returns KL divergence KL(q||p) per training example
+        KL = -0.5 * (1 + log(sigma**2) - mu**2 - sigma**2)
+        """
+        return -0.5*torch.sum(1 + 2*log_sigma - mu**2 - torch.exp(2*log_sigma))
+
+    def _get_kl_weight(self, step):
+        # Using min ensures that annealing happens only till anneal_till
+        # number of steps. So VERY IMPORTANT!
+        step = min(self.anneal_till, step)
+        if step == 0:
+            return 0.0
+        if self.anneal_type == 'tanh':
+            return np.round((np.tanh((step - self.x0)/1000) + 1)/2, decimals=6)
+        elif self.anneal_type == 'logistic':
+            return float(1/(1 + np.exp(-self.k*(step - self.x0))))
+        else:  # linear
+            return min(1, step/self.x0)
+
+    def _random_sample(self, n, img_z, z=None):
+        self.z_temp = self.config['sampling_temperature']
+        if z is None:
+            z = torch.randn(n, self.latent_dim).unsqueeze(0)
+        y = (torch.ones(self.config['MAX_LENGTH'], n) * self.sos_idx).long()
+        return z, self._decode(z.to(self.device), y.to(self.device),
+                               img_z.to(self.device), infer=True, y_specs=None,
+                               scorer_emb_wts=None)
+
+    def _interpolate(self, z1, z2, steps):
+        z1 = z1.cpu()
+        z2 = z2.cpu()
+        self.z_temp = self.config['sampling_temperature']
+        y = (torch.ones(self.config['MAX_LENGTH'], steps + 2) * self.sos_idx).long()
+        z = torch.tensor(np.linspace(z1, z2, steps)).squeeze().unsqueeze(0)
+        z = torch.cat((z1, z), dim=1)
+        z = torch.cat((z, z2), dim=1)
+        return self._decode(z.to(self.device), y.to(self.device), infer=True)
+
+    def _decode(self, z, y, img_z, infer, encoder_outputs=None,
                 mask=None, y_specs=None, scorer_emb_wts=None):
         """
         z -> (#enc_layers, batch_size x latent_dim)
@@ -250,7 +248,7 @@ class AutoEncoder(nn.Module):
         for t in range(1, max_y_len):
             # output -> (beam_size*bs, vocab_size)
             # dec_hidden -> (beam_size*bs, hidden * self.pf)
-            output, dec_hidden = self._decode_token(output, dec_hidden, mask)
+            output, dec_hidden = self._decode_token(output, dec_hidden, img_z, mask)
             # print(output.shape, decoder_outputs.shape, t)
             decoder_outputs[t] = output
             do_tf = random.random() < self.config['tf_ratio']
@@ -290,7 +288,7 @@ class AutoEncoder(nn.Module):
                 output = y[t].repeat(self.beam_size, 1).view(-1)
         return decoder_outputs
 
-    def _decode_token(self, input, hidden, mask):
+    def _decode_token(self, input, hidden, img_z, mask):
         """
         input -> (beam_size*bs)
         hidden -> (#dec_layers * self.pf x bs x hidden_dim)
@@ -306,7 +304,7 @@ class AutoEncoder(nn.Module):
         # output -> (1, beam_size*bs, hidden_dim) (decoder is unidirectional)
         # h_n (and c_n) -> (1, beam_size*bs, hidden)
         output, hidden = self.decoder(embedded, hidden)
-        output = self.output2vocab(torch.cat((output, embedded), dim=-1))
+        output = self.output2vocab(torch.cat((output, img_z.unsqueeze(0), embedded), dim=-1))
         # output -> (beam_size*bs, vocab_size)
         return output.squeeze(0), hidden
 
@@ -325,7 +323,7 @@ class AutoEncoder(nn.Module):
         dec_output = self.output2vocab(concat_output)
         return dec_output, context
 
-    def forward(self, x, x_lens, y=None):
+    def forward(self, x, x_lens, img_vec, step=None, y=None):
         """
         Performs one forward pass through the network, i.e., encodes x,
         predicts y through the decoder, calculates loss and finally,
@@ -337,30 +335,99 @@ class AutoEncoder(nn.Module):
         x_lens (tensor) -> lengths of the individual elements in x (batch_size)
         y (tensor) -> padded target sequences of shape (max_y_len, batch_size)
             y = None denotes inference mode
+        step (int) -> current step number. Needed for dynamic kl weight
         """
         infer = (y is None)
+        _, bs = x.shape
         if infer:  # model in val/test mode
             self.eval()
+            self.z_temp = self.config['sampling_temperature']
             y = torch.zeros(
                 (self.config['MAX_LENGTH'], x.shape[1])).long().fill_(
                  self.sos_idx).to(self.device)
         else:  # train mode
             self.train()
+            self.z_temp = 1.0
             self.optimizer.zero_grad()
 
-        # z is the final forward and backward hidden state of all layers
-        z = self._encode(x, x_lens)['z']
+        encoder_dict = self._encode(x, x_lens)
+        mu = encoder_dict['mu']
+        log_sigma = encoder_dict['log_sigma']
+        z = self._reparameterize(mu, log_sigma)
+
+        with torch.no_grad():
+            img_z, _, _ = self.image_vae.encode(img_vec)
+
         # decoder_outputs -> (max_y_len, bs*beam_size, vocab_size)
-        decoder_outputs = self._decode(z, y, infer)
+        decoder_outputs = self._decode(z, y, img_z, infer)
 
         # loss calculation and backprop
         loss = self.rec_loss(
             decoder_outputs[1:].view(-1, decoder_outputs.shape[-1]),
             y.repeat(1, self.beam_size)[1:].view(-1))
 
+        if step is not None:  # do kl annealing only for training phase
+            kl_weight = self._get_kl_weight(step)
+            if kl_weight == 0:
+                kl_params = {'loss': 0.0, 'weight': 0.0, 'wtd_loss': 0.0}
+            else:
+                kl_loss = self._calculate_kl(mu, log_sigma)
+                wtd_kl_loss = kl_weight * kl_loss
+                loss += wtd_kl_loss
+                kl_params = {
+                    'loss': kl_loss.item(),
+                    'weight': kl_weight,
+                    'wtd_loss': wtd_kl_loss.item()
+                    }
+            # pprint(kl_params)
+            # print(loss)
+        else:
+            kl_params = {'loss': None, 'weight': None, 'wtd_loss': None}
+
         if not infer:
             loss.backward()
             # Clip gradients (wt. update) (very important)
             nn.utils.clip_grad_norm_(self.parameters(), self.config['clip'])
             self.optimizer.step()
-        return {'pred_outputs': decoder_outputs, 'loss': loss}
+        return {
+                'pred_outputs': decoder_outputs,
+                'loss': loss,
+                'kl': kl_params
+                }
+
+
+class BimodalVED(dae.AutoEncoder):
+    """docstring for VariationalEncoderDecoder"""
+    def __init__(self, config, vocab, embedding_weights):
+        super(VariationalEncoderDecoder, self).__init__(config, vocab,
+                                                        embedding_weights)
+        self.add_ved_attrs()
+
+    def add_ved_attrs(self):
+        self.img_encoder = vgg16(pretrained=True)
+        self.img_dim = self.img_encoder.classifier[0].in_features
+
+        # Keep the last layer trainable
+        for p in self.img_encoder.parameters():
+            p.requires_grad = True
+
+        self.img_encoder.classifier = nn.Sequential(
+            nn.Linear(self.img_dim, self.img_dim // 2),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.img_dim // 2, 1000))
+
+        self.img2hidden = nn.Sequential(
+            nn.Dropout(self.dropout),
+            nn.Linear(1000, self.hidden_dim))
+
+    def _encode(self, x):
+        max_x_len, bs = x.shape
+        # convert input images to embeddings
+        outputs = self.img_encoder(x)  # bs x 1000
+        hidden = self.img2hidden(outputs)  # bs x hidden_dim
+        # Forward pass through the encoder
+        return {
+                'encoder_outputs': outputs,
+                'mu': self.z_mu(hidden),
+                'log_sigma': self.z_log_sigma(hidden)
+                }

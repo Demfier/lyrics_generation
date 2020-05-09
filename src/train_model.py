@@ -10,7 +10,7 @@ from tqdm import tqdm
 from pprint import pprint
 from tensorboardX import SummaryWriter
 
-from models import dae, vae
+from models import dae, vae, bvae
 from utils import preprocess, metrics
 from models.config import model_config as conf
 
@@ -107,7 +107,11 @@ def main():
     vocab = load_vocabulary()
     pprint(conf)
     print('Loading train, validation and test pairs.')
-    train_pairs, val_pairs, test_pairs = preprocess.prepare_data(conf)
+    if conf['model_code'] == 'bvae':
+        train_pairs, val_pairs, test_pairs, train_image_vec, \
+            val_image_vec, test_image_vec = preprocess.prepare_data(conf)
+    else:
+        train_pairs, val_pairs, test_pairs = preprocess.prepare_data(conf)
     # train_pairs = train_pairs[:1000]
     # val_pairs = val_pairs[:500]
     # test_pairs = test_pairs[:500]
@@ -124,6 +128,8 @@ def main():
         model = dae.AutoEncoder(conf, vocab, embedding_wts)
     elif conf['model_code'] == 'vae':
         model = vae.VariationalAutoEncoder(conf, vocab, embedding_wts)
+    elif conf['model_code'] == 'bvae':
+        model = bvae.BimodalVariationalAutoEncoder(conf, vocab, embedding_wts)
     elif 'ved' in conf['model_code']:
         model = vae.BimodalVED(conf, vocab, embedding_wts)
     else:
@@ -148,6 +154,15 @@ def main():
     for e in range(epoch, conf['n_epochs']):
         epoch_loss = []
         # Train for an epoch
+
+        # NOTE: REMOVE!!!!!
+        # img_vec_train = train_image_vec[0: 0 + conf['batch_size']]
+        # img_vec_train = torch.tensor(np.array(img_vec_train)).float().squeeze().to(device)
+        # img_vec_val = val_image_vec[0: 0 + conf['batch_size']]
+        # img_vec_val = torch.tensor(np.array(img_vec_val)).float().squeeze().to(device)
+        # img_vec_test = test_image_vec[0: 0 + conf['batch_size']]
+        # img_vec_test = torch.tensor(np.array(img_vec_test)).float().squeeze().to(device)
+
         for iter in tqdm(range(0, n_train, conf['batch_size'])):
             iter_pairs = train_pairs[iter: iter + conf['batch_size']]
             if len(iter_pairs) == 0:  # handle the strange error
@@ -159,13 +174,18 @@ def main():
             if conf['model_code'] == 'vae':
                 pred_dict = model(x_train, x_lens,
                                   train_iter, y_train)
+            elif conf['model_code'] == 'bvae':
+                img_vec_train = train_image_vec[iter: iter + conf['batch_size']]
+                img_vec_train = img_vec_train.to(device)
+                pred_dict = model(x_train, x_lens, img_vec_train,
+                                  train_iter, y_train)
             else:
                 pred_dict = model(x_train, x_lens, y_train)
             loss = pred_dict['loss'].item()
             # y_train -> (max_y_len, bs)
             epoch_loss.append(loss)
             writer.add_scalar('data/train_loss', loss, train_iter)
-            if conf['model_code'] == 'vae':
+            if 'vae' in conf['model_code']:
                 writer.add_scalar('data/train_kl', pred_dict['kl']['loss'], train_iter)
                 writer.add_scalar('data/train_kl_wt', pred_dict['kl']['weight'], train_iter)
                 writer.add_scalar('data/train_wtd_kl', pred_dict['kl']['wtd_loss'], train_iter)
@@ -185,7 +205,12 @@ def main():
                 x_val, x_lens, y_val = preprocess._btmcd(vocab,
                                                          iter_pairs,
                                                          conf)
-                pred_dict = model(x_val, x_lens)
+                if conf['model_code'] == 'bvae':
+                    img_vec_val = val_image_vec[iter: iter + conf['batch_size']]
+                    img_vec_val = img_vec_val.to(device)
+                    pred_dict = model(x_val, x_lens, img_vec_val)
+                else:
+                    pred_dict = model(x_val, x_lens)
                 outputs = pred_dict['pred_outputs']
                 loss = pred_dict['loss'].item()
                 epoch_loss.append(loss)
@@ -227,7 +252,12 @@ def main():
                     x_test, x_lens, y_test = preprocess._btmcd(vocab,
                                                                iter_pairs,
                                                                conf)
-                    pred_dict = model(x_test, x_lens)
+                    if conf['model_code'] == 'bvae':
+                        img_vec_test = test_image_vec[iter: iter + conf['batch_size']]
+                        img_vec_test = img_vec_test.to(device)
+                        pred_dict = model(x_test, x_lens, img_vec_test)
+                    else:
+                        pred_dict = model(x_test, x_lens)
                     outputs = pred_dict['pred_outputs']
                     loss = pred_dict['loss'].item()
                     epoch_loss.append(loss)

@@ -103,19 +103,19 @@ def main():
             print(sentences)
         print(s2)
 
-        print('\n### Testing VAE+Scoring function ###:\n')
-        scorer_emb_wts = load_scorer_embeddings()
+        # print('\n### Testing VAE+Scoring function ###:\n')
+        # scorer_emb_wts = load_scorer_embeddings()
 
-        i = 0
-        for spec_id, spec in get_specs():
-            print(i, spec_id)
-            z, logits = model._random_sample(1)
-            random_sampled = translate(vocab, logits)
-            with_scorer = translate(vocab, model._random_sample(1, z, spec)[1])
-            random_and_with_scorer = '\n'.join(map(lambda x, y: '{}=>{}'.format(x, y), random_sampled, with_scorer))
-            with open('reports/outputs/random_sampled_{}_with_scorer_{}_temp_{}.txt'.format(conf['pretrained_model'], conf['pretrained_scorer'], conf['scorer_temp']), 'a') as f:
-                f.write('{}:\n{}\n'.format(spec_id, random_and_with_scorer))
-            i += 1
+        # i = 0
+        # for spec_id, spec in get_specs():
+        #     print(i, spec_id)
+        #     z, logits = model._random_sample(1)
+        #     random_sampled = translate(vocab, logits)
+        #     with_scorer = translate(vocab, model._random_sample(1, z, spec)[1])
+        #     random_and_with_scorer = '\n'.join(map(lambda x, y: '{}=>{}'.format(x, y), random_sampled, with_scorer))
+        #     with open('reports/outputs/random_sampled_{}_with_scorer_{}_temp_{}.txt'.format(conf['pretrained_model'], conf['pretrained_scorer'], conf['scorer_temp']), 'a') as f:
+        #         f.write('{}:\n{}\n'.format(spec_id, random_and_with_scorer))
+        #     i += 1
 
 
 if __name__ == '__main__':

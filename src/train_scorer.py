@@ -19,6 +19,25 @@ from models.scoring_functions import (RNNScorer,
                                       SpecOnlyClassifier)
 
 
+def translate(vocab, pred_tokens):
+    """
+    Converts model output logits to sentences
+    logits -> (max_y_len, bs, vocab_size)
+
+    """
+    pred_tokens = pred_tokens.permute(1, 0)
+
+    generated = []
+    for token_list in pred_tokens:
+        sentence = []
+        for t in token_list:
+            sentence.append(vocab.index2word[t.item()])
+            if t == conf['EOS_TOKEN']:
+                break
+        generated.append(' '.join(sentence))
+    return generated
+
+
 def load_vocabulary():
     if os.path.exists(conf['vocab_path']):
 
@@ -63,6 +82,20 @@ def save_snapshot(model, epoch_num):
                                      conf['unit'], epoch_num))
 
 
+def get_specs(n=2):
+    with open('data/processed/bimodal_scorer/spec_array.pkl', 'rb') as f:
+        spec_array = pickle.load(f)
+    # randomly choose n spec_ids
+    spec_ids = list(spec_array.keys())
+    # print(spec_ids)
+    # for k in spec_ids:
+
+    #     show_img(np.array(spec_array[k], dtype=np.uint8), str(k) + '.png')
+    for k in spec_ids[:5]:
+        yield k, torch.tensor([spec_array[k]]).float().view(
+            -1, 224, 224, 3).permute(0, 3, 1, 2).contiguous().to(conf['device'])
+
+
 def main():
     # Initialize tensorboardX writer
     writer = SummaryWriter()
@@ -70,10 +103,21 @@ def main():
     pprint(conf)
     print('Loading train, validation and test pairs.')
     train_pairs, y_train = preprocess.read_pairs(conf, mode='train')
-    y_train = y_train.to(conf['device'])
+    y_train = list(y_train)
+    for i in range(len(y_train)):
+        if y_train[i] == 0:
+            y_train[i] == -1
+    y_train = torch.tensor(y_train).long().to(conf['device'])
     val_pairs, y_val = preprocess.read_pairs(conf, mode='val')
-    y_val = y_val.to(conf['device'])
+    for i in range(len(y_val)):
+        if y_val[i] == 0:
+            y_val[i] == -1
+    y_val = torch.tensor(y_val).long().to(conf['device'])
     test_pairs, y_test = preprocess.read_pairs(conf, mode='test')
+    for i in range(len(y_test)):
+        if y_test[i] == 0:
+            y_test[i] == -1
+    y_test = torch.tensor(y_test).long().to(conf['device'])
     y_test = y_test.to(conf['device'])
     train_pairs = train_pairs[: conf['batch_size'] * (
         len(train_pairs) // conf['batch_size'])]
@@ -97,10 +141,10 @@ def main():
     print('Building model..')
     if conf['model_code'] == 'bilstm_scorer':
         model = RNNScorer(conf, embedding_wts)
-    elif conf['model_code'] == 'bimodal_scorer':
+    elif 'bimodal_scorer' in conf['model_code']:
         model = BiModalScorer(conf, embedding_wts)
         print('Loading spec_array...')
-        with open('data/processed/bimodal_scorer/spec_array.pkl', 'rb') as f:
+        with open('data/processed/{}/spec_array.pkl'.format(conf['model_code']), 'rb') as f:
             spec_array = pickle.load(f)
     elif conf['model_code'] == 'lyrics_clf':  # classifier
         model = LyricsOnlyClassifier(conf, embedding_wts)
@@ -111,12 +155,12 @@ def main():
             spec_array = pickle.load(f)
         print('Artists: {}'.format(', '.join(sorted(list(conf['label_names'])))))
     model = model.to(device)
-    criterion = nn.CrossEntropyLoss(reduction='sum')  # to train genre classifier
+    criterion = nn.HingeEmbeddingLoss(reduction='sum')  # to train genre classifier
     optimizer = optim.Adam(model.parameters(), lr=conf['lr'])
     if conf['pretrained_model']:
-        print('Restoring {}...'.format(conf['pretrained_model']))
+        print('Restoring {}...'.format(conf['pretrained_scorer']))
         checkpoint = torch.load('{}{}'.format(conf['save_dir'],
-                                              conf['pretrained_model']),
+                                              conf['pretrained_scorer']),
                                 map_location=device)
         model.load_state_dict(checkpoint['model'])
         epoch = checkpoint['epoch']
@@ -140,7 +184,7 @@ def main():
             iter_pairs = train_pairs[iter: iter + conf['batch_size']]
             if len(iter_pairs) == 0:  # handle the strange error
                 continue
-            if conf['model_code'] in ['bimodal_scorer', 'spec_clf']:
+            if conf['model_code'] in ['bimodal_scorer', 'spec_clf', 'IC_bimodal_scorer']:
                 x_train = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
             else:
                 x_train = preprocess._btmcd(vocab, iter_pairs, conf)
@@ -166,7 +210,7 @@ def main():
             actual = y_val.cpu().numpy()
             for iter in tqdm(range(0, n_val, conf['batch_size'])):
                 iter_pairs = val_pairs[iter: iter + conf['batch_size']]
-                if conf['model_code'] in ['bimodal_scorer', 'spec_clf']:
+                if conf['model_code'] in ['bimodal_scorer', 'spec_clf', 'IC_bimodal_scorer']:
                     x_val = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
                 else:
                     x_val = preprocess._btmcd(vocab, iter_pairs, conf)
@@ -177,7 +221,6 @@ def main():
                 epoch_loss.append(loss.item())
                 generated = np.concatenate((generated, preds))
                 epoch_loss.append(loss.item())
-
             metrics.plot_confusion_matrix(
                 actual, generated, normalize=True,
                 classes=conf['classes'],
@@ -190,7 +233,20 @@ def main():
             val_iter += 1
             # Save model
             save_snapshot(model, e)
+            # spec1 = pickle.load(open('NineInchNails_1000000_23.png.pkl', 'rb'))
+            # spec2 = pickle.load(open('DepecheMode_never-let-me-down-again_18.png.pkl', 'rb'))
+            # print(model.img_encoder(torch.tensor(spec1).to(device)))
+            # print(model.img_encoder(torch.tensor(spec2).to(device)))
 
+            # i = 0
+            # for spec_id, spec in get_specs():
+            #     print(i, spec_id)
+            #     tokens = model.decode(spec)
+            #     sentences = translate(vocab, tokens)
+            #     print('{}'.format('\n'.join(sentences)))
+            #     # with open('reports/outputs/random_sampled_{}_with_scorer_{}_temp_{}.txt'.format(conf['pretrained_model'], conf['pretrained_scorer'], conf['scorer_temp']), 'a') as f:
+            #     #     f.write('{}:\n{}\n'.format(spec_id, random_and_with_scorer))
+            #     i += 1
             epoch_loss = []
 
             # Evaluate on the test set every 5 epochs
@@ -199,7 +255,7 @@ def main():
                 actual = y_test.cpu().numpy()
                 for iter in range(0, n_test, conf['batch_size']):
                     iter_pairs = test_pairs[iter: iter + conf['batch_size']]
-                    if conf['model_code'] in ['bimodal_scorer', 'spec_clf']:
+                    if conf['model_code'] in ['bimodal_scorer', 'spec_clf', 'IC_bimodal_scorer']:
                         x_test = preprocess._btmcd(vocab, iter_pairs, conf, spec_array)
                     else:
                         x_test = preprocess._btmcd(vocab, iter_pairs, conf)

@@ -8,6 +8,7 @@ from models import scoring_functions
 import h5py
 import skimage
 import numpy as np
+import sys
 
 
 def translate(vocab, pred_tokens):
@@ -67,7 +68,7 @@ def main():
         raise ValueError('Invalid model code: {}'.format(conf['model_code']))
     model.load_state_dict(
         torch.load(
-            '{}{}'.format(conf['save_dir'], conf['pretrained_scorer']),
+            '{}{}'.format(conf['save_dir'], 'bimodal_scorer-1L-bilstm-4'),
             map_location=device)['model'])
 
     model = model.to(device)
