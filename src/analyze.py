@@ -24,7 +24,9 @@ n = 100
 
 instrumental_song_ids = list(instrumental_mu.keys())
 
-for i in tqdm(instrumental_song_ids):
+pbar = tqdm(instrumental_song_ids)
+
+for i in pbar:
     # print(i)
     if len(i.split(' ')) == 1:
         modified_i = i.replace('-', ' ')
@@ -109,6 +111,14 @@ for i in tqdm(instrumental_song_ids):
     same_song_prop.append(same_songs)
     same_artist_prop.append(same_artists)
     same_album_prop.append(same_albums)
+
+    pbar.set_postfix(
+        song_prop=np.mean(same_song_prop),
+        artist_prop=np.mean(same_artist_prop),
+        album_prop=np.mean(same_album_prop),
+        )
+
+pbar.close()
 
 print(np.mean(same_song_prop))
 print(np.mean(same_artist_prop))
