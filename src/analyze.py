@@ -6,10 +6,10 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.metrics.pairwise import cosine_similarity
 
-with open('data/processed/instrumental/image_mu_10sec_instrumental.pkl', 'rb') as f:
+with open('data/processed/instrumental/image_mu_testing_ISMIR.pkl', 'rb') as f:
     instrumental_mu = pickle.load(f)
 
-with open('data/processed/instrumental/image_mu_combined_10sec_mix.pkl', 'rb') as f:
+with open('data/processed/instrumental/image_mu_combined_ISMIR.pkl', 'rb') as f:
     combined_mu = pickle.load(f)
 
 with open('data/processed/instrumental/instrumental_songs_albums.json', 'r') as f:

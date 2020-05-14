@@ -17,6 +17,6 @@ def make_spec_array_pkl(spec_root_dir, save_path):
 
 
 if __name__ == '__main__':
-    SPEC_PATH = 'data/raw/instrumental_new/'
-    SAVE_PATH = 'data/processed/instrumental_new/spec_array.pkl'
+    SPEC_PATH = '/collection/d35kumar/Lyrics-Music-Aligned-7-artists/DepecheMode1/Specs/'
+    SAVE_PATH = 'data/processed/ismir_new/dm_spec_array.pkl'
     make_spec_array_pkl(SPEC_PATH, SAVE_PATH)
