@@ -75,12 +75,10 @@ class RNNScorer(nn.Module):
         return new_encoded
 
     def pool(self, rnn_output):
-
         if self.avg_pool:
             rnn_output = F.avg_pool1d(rnn_output, rnn_output.size(2))
         else:
             rnn_output = F.max_pool1d(rnn_output, rnn_output.size(2))
-
         return rnn_output.squeeze(2)
 
     def encoder(self, embedded):
